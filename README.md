@@ -1,2 +1,2 @@
-# CN-Assignment-MahiMahi
-Explore​​ MahiMahi​ and demonstrate its usage.
+# CN-Assignment-Trace Replay Application
+Trace based application layer modeling in ns-3
