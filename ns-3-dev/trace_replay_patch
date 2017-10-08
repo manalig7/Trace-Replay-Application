@@ -1,0 +1,2886 @@
+Index: src/applications/doc/trace-replay.rst
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/doc/trace-replay.rst
+@@ -0,0 +1,80 @@
++Trace-based application layer modeling (TraceReplay)
++----------------------------------------------------
++
++Model Description
++*****************
++
++The goal of TraceReplay is to make simulations more realistic. TraceReplay uses network trace collected
++from user to infer and replay only application layer delays like user think times. TraceReplay extracts
++application layer characteristics from a single trace, and replays this information across many users in
++simulation, by using suitable randomization.
++
++TraceReplay contains following classes:
++ - TraceReplayClient: Implementation of client. In each cycle, client sends server ``n1`` packets (total ``B1`` bytes) as request and expects to receive ``B2`` bytes as the reply.
++ - TraceReplayServer: Implementation of a server. In each cycle server expects to receive ``B1`` bytes as request from client and sends ``n2`` packets (total ``B2`` bytes) as reply.
++ - TraceReplayPacket: Stores details (size, delay) about each packet
++
++Delay for a packet are of two type:
++ - HTTP request delay: inter-packet gap between the first packet of a HTTP request and the packet immediately preceding it on the same TCP connection (can be considered as user think time for HTTP connections)
++ - SSH delay: inter-packet gap between the two packet on the same TCP connection if it is greater than 1 second (can be considered as user think time for non-HTTP connections)
++
++If the delay for a packet is greater than 0 seconds, we also store total byte (sent and received) count for
++all parallel connections (a parallel connection is in which source and destination IPs are
++same but port numbers are different). While replaying the packet we compare the total number
++of bytes on each of those parallel connections in the trace before the current
++point of time with the actual total number of bytes on those connections in the simulation.
++If any of those connections is found to have sent and received fewer bytes in simulation than in the
++experimental trace, TraceReplay delays the transmission of the current packet to a point
++where all parallel connections have made sufficient progress. For further details see [Paper]_
++
++Users can either provide a pcap or trace file as input. In case, both pcap and trace file are provided, trace file will be ignored and pcap will be used to generate a new trace file.
++
++Different behavior for each client can be simulated by providing different pcap/trace file to clients.
++
++Random variable stream is provided to avoid synchronization between the start times of multiple clients.
++
++The source code for TraceReplay is located in ``src/applications/model`` and consists of the following 6 files:
++ - trace-replay-server.h,
++ - trace-replay-server.cc,
++ - trace-replay-client.h,
++ - trace-replay-client.cc,
++ - trace-replay-utility.h and
++ - trace-replay-utility.cc
++
++Helpers
++*******
++The helper code for TraceReplay is located in ``src/applications/helper`` and consists of the following 2 files:
++ - trace-reaply-helper.h and 
++ - trace-replay-helper.cc
++
++
++Examples
++********
++The example for TraceReplay can be found at ``examples/trace-replay/trace-replay-example.cc``
++
++The sample pcap file for TraceReplay can be found at ``examples/trace-replay/trace-replay-sample.pcap``
++
++References
++**********
++.. [paper] ``Trace-based application layer modeling in ns3``, Prakash Agrawal and Mythili Vutukuru. Presented at Twenty-Second National Conference on Communications 2016. Link https://goo.gl/Z4ZW2K
++
++Scope and Limitations
++*********************
++TraceReplay is useful in replaying network traces where application or user behavior dictates
++the network traffic, rather than lower layers or wired side.
++
++For example, it will be useful in simulating a web browsing scenario or case where user is
++watching an interactive video (like in coursera or bodhitree),
++beacuse in that case application/user behavior will be dominant over other factors.
++
++An example where TraceReplay is not useful is when we replay a network trace of file download over web.
++In this scenario, there is not much application or user behavior that TraceReplay can capture as the
++download traffic is largely determined by the rate of the wired network bottleneck link,
++and not by other factors. Results of the TraceReplay will be similar to any other application layer model.
++
++TraceReplay is particularly useful in simulating wireless networks, because traffic characteristics (such as upload traffic)
++have a significant impact on wireless channel contention, and small improvements in traffic models
++can greatly enhance the realistic nature of simulation results.
++
++The input pcap to TraceReplay must be collected from a single client, as all the connections
++present in pcap will be replayed for a simulated node.
+\ No newline at end of file
+Index: src/applications/examples/trace-replay-example.cc
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/examples/trace-replay-example.cc
+@@ -0,0 +1,179 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ *
++ */
++
++// Command to run simulation:
++// Copy src/applications/examples/trace-replay-example.cc to scratch folder
++// ./waf --run "scratch/trace-replay-example --pcapPath=src/applications/examples/trace-replay-sample.pcap --nWifi=1"
++// pcapPath : path to input pcap file
++// traceFilePath : path to input trace file
++// nWifi    : Number of wifi client to simulate
++//
++// Default Network Topology
++//
++//     Wifi 10.1.3.0
++//                   AP
++//    *    *    *    *
++//    |    |    |    |       10.1.1.0
++// nWifi   n2   n1   n0 ------------------ Server
++//                        point-to-point
++//
++// This example creates network as shown above. All the clients
++// are share 802.11g wireless network and connect to a single server.
++// TraceReplayHelper installs TraceReplayClient on each client and
++// corresponding TraceReplayServer, for each connection.
++//
++// The input pcap file must contain only one client.
++// Different nodes can be given different pcap file as input to simulate 
++// different application/user behavior.
++// TraceReplay will analyze each connection present in pcap file
++// (such as number of connection, application/user delays for packet, size of request etc)
++// and will replay it for every node which is given that pcap as input.
++//
++//
++
++#include "ns3/core-module.h"
++#include "ns3/network-module.h"
++#include "ns3/internet-module.h"
++#include "ns3/point-to-point-module.h"
++#include "ns3/applications-module.h"
++#include "ns3/wifi-module.h"
++#include "ns3/mobility-module.h"
++#include <iostream>
++#include <fstream>
++#include <vector>
++#include <cstdlib>
++#include <ctime>
++
++using namespace ns3;
++
++NS_LOG_COMPONENT_DEFINE ("TraceReplayExample");
++
++int
++main (int argc, char *argv[])
++{
++  Config::SetDefault ("ns3::TcpSocket::SegmentSize", UintegerValue (1448));
++  uint32_t nWifi = 1;
++  std::string pcapPath = "";
++  std::string traceFilePath = "";
++
++  CommandLine cmd;
++  cmd.AddValue ("pcapPath", "path to input pcap file", pcapPath);
++  cmd.AddValue ("traceFilePath", "path to input trace file", traceFilePath);
++  cmd.AddValue ("nWifi", "Number of client", nWifi);
++  cmd.Parse (argc, argv);
++
++  Time stopTime = Seconds(1000);
++
++  NS_LOG_INFO ("Create p2p nodes.");
++  NodeContainer p2pNodes;
++  p2pNodes.Create (2);
++
++  NS_LOG_INFO ("Create p2p channels.");
++  PointToPointHelper pointToPoint;
++  pointToPoint.SetDeviceAttribute ("DataRate", StringValue ("100MBps"));
++  pointToPoint.SetChannelAttribute ("Delay", StringValue ("3ms"));
++
++  NetDeviceContainer p2pDevices;
++  p2pDevices = pointToPoint.Install (p2pNodes);
++
++  NS_LOG_INFO ("Create wifi nodes.");
++  NodeContainer wifiStaNodes;
++  wifiStaNodes.Create (nWifi);
++  NodeContainer wifiApNode = p2pNodes.Get (0);
++
++  NS_LOG_INFO ("Create wireless channel.");
++  YansWifiChannelHelper channel = YansWifiChannelHelper::Default ();
++  YansWifiPhyHelper phy = YansWifiPhyHelper::Default ();
++  phy.SetChannel (channel.Create ());
++  WifiHelper wifi;
++
++  wifi.SetRemoteStationManager ("ns3::MinstrelWifiManager");
++  NqosWifiMacHelper mac = NqosWifiMacHelper::Default ();
++
++  wifi.SetStandard (WIFI_PHY_STANDARD_80211g);
++
++  Ssid ssid = Ssid ("ns-3-ssid");
++  mac.SetType ("ns3::StaWifiMac",
++               "Ssid", SsidValue (ssid),
++               "ActiveProbing", BooleanValue (false));
++
++  NetDeviceContainer staDevices;
++  staDevices = wifi.Install (phy, mac, wifiStaNodes);
++
++  mac.SetType ("ns3::ApWifiMac",
++               "Ssid", SsidValue (ssid));
++
++  NetDeviceContainer apDevices;
++  apDevices = wifi.Install (phy, mac, wifiApNode);
++
++  MobilityHelper mobility;
++
++  mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
++                                 "MinX", DoubleValue (0.0),
++                                 "MinY", DoubleValue (0.0),
++                                 "DeltaX", DoubleValue (2.0),
++                                 "DeltaY", DoubleValue (2.0),
++                                 "GridWidth", UintegerValue (2),
++                                 "LayoutType", StringValue ("RowFirst"));
++
++  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
++  mobility.Install (wifiApNode);
++  mobility.Install (wifiStaNodes);
++
++  InternetStackHelper stack;
++  stack.Install (p2pNodes.Get (1));
++  stack.Install (wifiApNode);
++  stack.Install (wifiStaNodes);
++
++  NS_LOG_INFO ("Assign IP Addresses.");
++  Ipv4AddressHelper address;
++
++  address.SetBase ("10.1.1.0", "255.255.255.0");
++  Ipv4InterfaceContainer p2pInterfaces;
++  p2pInterfaces = address.Assign (p2pDevices);
++
++  address.SetBase ("10.1.3.0", "255.255.255.0");
++  Ipv4InterfaceContainer wifiInterfaces;
++  wifiInterfaces = address.Assign (staDevices);
++  address.Assign (apDevices);
++
++  NS_LOG_INFO ("Create TraceReplay on each wifi client and server pair.");
++  for (uint32_t i = 0; i < nWifi; i++)
++    {
++      TraceReplayHelper application (DataRate ("25MBps"));
++      application.SetPcap (pcapPath);
++      application.AssignStreams (i);
++      application.SetStopTime (stopTime);
++      application.SetPortNumber (49153 + 200 * i);
++      application.Install (wifiStaNodes.Get (i), p2pNodes.Get (1), Address (p2pInterfaces.GetAddress (1)));
++    }
++
++  Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
++  NS_LOG_INFO ("Run Simulation.");
++  Simulator::Stop (stopTime);
++  pointToPoint.EnablePcapAll ("traceReplayTest");
++  Simulator::Run ();
++  Simulator::Destroy ();
++  NS_LOG_INFO ("Done.");
++  return 0;
++}
+\ No newline at end of file
+Index: src/applications/examples/wscript
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/examples/wscript
+@@ -0,0 +1,6 @@
++## -*- Mode: python; py-indent-offset: 4; indent-tabs-mode: nil; coding: utf-8; -*-
++
++def build(bld):
++    obj = bld.create_ns3_program('trace-replay-example',
++				  ['point-to-point', 'wifi', 'internet', 'applications'])
++    obj.source = 'trace-replay-example.cc'
+\ No newline at end of file
+Index: src/applications/helper/trace-replay-helper.cc
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/helper/trace-replay-helper.cc
+@@ -0,0 +1,866 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ */
++
++#include "ns3/log.h"
++#include "ns3/address.h"
++#include "ns3/inet-socket-address.h"
++#include "ns3/inet6-socket-address.h"
++#include "ns3/packet-socket-address.h"
++#include "ns3/node.h"
++#include "ns3/nstime.h"
++#include "ns3/data-rate.h"
++#include "ns3/random-variable-stream.h"
++#include "ns3/socket.h"
++#include "ns3/simulator.h"
++#include "ns3/socket-factory.h"
++#include "ns3/packet.h"
++#include "ns3/double.h"
++#include "ns3/tcp-socket-factory.h"
++#include "ns3/string.h"
++#include "ns3/pointer.h"
++#include "ns3/trace-replay-utility.h"
++#include "ns3/trace-replay-client.h"
++#include "ns3/trace-replay-server.h"
++#include "trace-replay-helper.h"
++
++namespace ns3 {
++
++NS_LOG_COMPONENT_DEFINE ("TraceReplayHelper");
++
++TraceReplayHelper::TraceReplayHelper (DataRate dataRate)
++{
++  m_stopTime = Seconds (0);
++  m_startTimeOffset = Seconds (0);
++  m_dataRate = dataRate;
++  m_portNumber = 49153;
++  m_traceFilePath = "";
++  m_pcapPath = "";
++
++  // m_startTimeJitter is time (in ms) a connection waits before starting, to avoid synchronization between multiple clients.
++  // Value is uniform random-variable between 0 and 1000.
++  m_startTimeJitter = CreateObject<UniformRandomVariable> ();
++  m_startTimeJitter->SetAttribute ("Min", DoubleValue (0));
++  m_startTimeJitter->SetAttribute ("Max", DoubleValue (1000));
++  NS_LOG_FUNCTION (this);
++}
++
++TraceReplayHelper::~TraceReplayHelper ()
++{
++  m_connMap.clear ();
++  m_timeoutMap.clear ();
++  m_httpReqMap.clear ();
++  NS_LOG_FUNCTION (this);
++}
++
++bool
++TraceReplayHelper::m_connId::operator< (const m_connId& rhs) const
++{
++  return this->ipClient < rhs.ipClient
++         || (this->ipClient == rhs.ipClient && this->portClient < rhs.portClient)
++         || (this->ipClient == rhs.ipClient && this->portClient == rhs.portClient
++             && this->ipServer < rhs.ipServer)
++         || (this->ipClient == rhs.ipClient && this->portClient == rhs.portClient
++             && this->ipServer == rhs.ipServer && this->portServer < rhs.portServer);
++}
++
++void
++TraceReplayHelper::SetPcap (std::string pcap)
++{
++  NS_LOG_FUNCTION (this);
++  m_pcapPath = pcap;
++}
++
++void
++TraceReplayHelper::SetTraceFile (std::string traceFile)
++{
++  NS_LOG_FUNCTION (this);
++  m_traceFilePath = traceFile;
++}
++
++int64_t
++TraceReplayHelper::AssignStreams (int64_t stream)
++{
++  NS_LOG_FUNCTION (this);
++  m_startTimeJitter->SetStream (stream);
++  return 1;
++}
++
++void
++TraceReplayHelper::SetStopTime (Time stopTime)
++{
++  NS_LOG_FUNCTION (this);
++  m_stopTime = stopTime;
++}
++
++void
++TraceReplayHelper::SetStartTimeOffset (Time time)
++{
++  NS_LOG_FUNCTION (this);
++  m_startTimeOffset = time;
++}
++
++void
++TraceReplayHelper::SetPortNumber (uint16_t port)
++{
++  NS_LOG_FUNCTION (this);
++  m_portNumber = port;
++}
++
++void
++TraceReplayHelper::RunCommands ()
++{
++  NS_LOG_FUNCTION (this);
++  if (!std::ifstream (m_pcapPath.c_str ()))
++    {
++      std::cerr << "Input pcap file is missing.\n";
++      exit (1);
++    }
++
++  // Get frame number of all the tcp packets which are also http requests
++  std::string command = "tshark -r " + m_pcapPath + " -Y \"http.request.method and tcp\" -n -T fields -e frame.number > httpRequestFile";
++  system (command.c_str ());
++
++  // Get details about all the tcp packets
++  command = "tshark -r " + m_pcapPath + " -Y \"ip.proto==6 \" -n -T fields -e ip.src -e tcp.srcport -e ip.dst -e tcp.dstport -e tcp.len -e frame.time_relative -e frame.number > tcpPackets.csv";
++  system (command.c_str ());
++
++  // Get tcp timeout details for each packet
++  command = "tshark -r " + m_pcapPath + " -Y \"ip.proto == 6 and tcp.analysis.rto > 0\" -n -T fields -e frame.number -e tcp.analysis.rto > tcpTimeout";
++  system (command.c_str ());
++}
++
++void
++TraceReplayHelper::ProcessHttpList ()
++{
++  NS_LOG_FUNCTION (this);
++  // Reading httpRequestFile to make a list of frame number of  http requests
++  std::string filename = "httpRequestFile";
++  std::ifstream infile;
++  infile.open (filename.c_str ());
++  if (infile.is_open ())
++    {
++      uint32_t val;
++      while (infile >> val)
++        {
++          m_httpReqMap[val] = true;
++        }
++    }
++  else
++    {
++      std::cerr << "Error opening httpRequestFile file.\n";
++      exit (1);
++    }
++  infile.close ();
++}
++
++void
++TraceReplayHelper::ProcessTimeoutList ()
++{
++  NS_LOG_FUNCTION (this);
++  // Reading tcpTimeoutFile file to make a list of timed out packets
++  std::string filename = "tcpTimeout";
++  std::ifstream infile;
++  infile.open (filename.c_str ());
++  if (infile.is_open ())
++    {
++      uint32_t val;
++      while (infile >> val)
++        {
++          m_timeoutMap[val] = true;
++        }
++    }
++  else
++    {
++      std::cerr << "Error opening tcpTimeout file.\n";
++      exit (1);
++    }
++  infile.close ();
++}
++
++double
++TraceReplayHelper::CalculatePacketDelay (uint32_t frameNum, bool timeOut, bool httpReq, double currTime, double packetTime)
++{
++  double delay = 0;
++  // if it is time out packet then delay will be 0 as TraceReplay is trying to simulate only application layer delays
++  if (!timeOut)
++    {
++      double httpDelay = 0;
++      double sshDelay = 0;
++      if (httpReq)
++        {
++          // if packet is http request then delay will be time between this and last packet
++          httpDelay = packetTime - currTime;
++        }
++      if (packetTime - currTime > 1)
++        {
++          // sshdelay is considered only when it is > 1 seconds
++          sshDelay = packetTime - currTime;
++        }
++      delay = std::max (httpDelay, sshDelay);
++    }
++  if (delay < 0.000001)
++    {
++      return 0;
++    }
++  return delay;
++}
++
++void
++TraceReplayHelper::ProcessPacket (m_connId id, uint32_t packetSize, double packetTime, uint32_t frameNum)
++{
++  TraceReplayPacket packet;
++  packet.SetSize (packetSize);
++
++  bool clientPacket;
++
++  // If id is present in m_connMap then its Client packet, otherwise Server packet
++  if (m_connMap.find (id) != m_connMap.end ())
++  {
++    clientPacket = true;
++    if (m_connMap[id].packetC2S)
++    {
++      // last packet in connection was also from client to server
++      m_connMap[id].packetCount += 1;
++      m_connMap[id].byteCount += packetSize;
++    }
++    else
++    {
++      // last packet in connection was from server to client.
++      // Therefore this packet is a new request.
++      // Update server details.
++      m_connMap[id].numRep.push_back (m_connMap[id].packetCount);
++      m_connMap[id].expByteServer.push_back (m_connMap[id].byteCount);
++      m_connMap[id].packetC2S = true;
++      m_connMap[id].packetCount = 1;
++      m_connMap[id].byteCount = packetSize;
++    }
++  }
++  else
++  {
++    // packet is from server to client, reverse ip and port
++    Address tmp1 = id.ipClient;
++    id.ipClient = id.ipServer;
++    id.ipServer = tmp1;
++    uint32_t tmp2 = id.portClient;
++    id.portClient = id.portServer;
++    id.portServer = tmp2;
++
++    clientPacket = false;
++    if (!m_connMap[id].packetC2S)
++    {
++      m_connMap[id].packetCount += 1;
++      m_connMap[id].byteCount += packetSize;
++    }
++    else
++    {
++      m_connMap[id].numReq.push_back (m_connMap[id].packetCount);
++      m_connMap[id].expByteClient.push_back (m_connMap[id].byteCount);
++      m_connMap[id].packetC2S = false;
++      m_connMap[id].packetCount = 1;
++      m_connMap[id].byteCount = packetSize;
++    }
++  }
++
++  double delay = CalculatePacketDelay (frameNum, m_timeoutMap[frameNum], m_httpReqMap[frameNum],
++                                         (m_connMap[id].currTime).GetSeconds (), packetTime);
++  packet.SetDelay (Seconds (delay));
++  if ((packet.GetDelay ()).IsStrictlyPositive ())
++  {
++    // delay > 0 seconds
++    // Therefore get the list of all parallel connections and total packets sent by so far
++    std::map<m_connId, m_connInfo>::iterator it;
++    for (it = m_connMap.begin (); it != m_connMap.end (); it++)
++    {
++      // A parallel connection is that in which src and dst ips are same
++      // but src and dst port are different.
++      // Ignore the connection if total packet send by it so far is 0
++      if ((it->first).ipClient == id.ipClient && (it->first).ipServer == id.ipServer
++            && ((it->first).portClient != id.portClient || (it->first).portServer != id.portServer)
++            && it->second.totByteCount > 0)
++      {
++        packet.AddParallelConnection ((it->first).portClient, (it->first).portServer, (it->second).totByteCount);
++      }
++    }
++  }
++
++  if (clientPacket)
++  {
++    m_connMap[id].clientPackets.push_back (packet);
++  }
++  else
++  {
++    m_connMap[id].serverPackets.push_back (packet);
++  }
++
++  m_connMap[id].currTime = Seconds (packetTime);
++  // Increament total packet sent by connection so far
++  m_connMap[id].totByteCount += packetSize;
++}
++
++void
++TraceReplayHelper::ProcessPacketList ()
++{
++  // Reading packetFile to get details about each individual packet and map them to a connection
++  std::string filename = "tcpPackets.csv";
++  std::ifstream infile;
++  infile.open (filename.c_str ());
++  if (infile.is_open ())
++    {
++      std::string line;
++      while (std::getline (infile, line))
++        {
++          std::istringstream iss (line);
++          std::string ipSrc;
++          uint16_t portSrc;
++          std::string ipDest;
++          uint16_t portDest;
++          uint32_t packetSize;
++          uint32_t frameNum;
++          double packetTime;
++
++          iss >> ipSrc >> portSrc >> ipDest >> portDest;
++          iss >> packetSize >> packetTime >> frameNum;
++
++          m_connId id;
++          if (std::regex_search (ipSrc.begin (), ipSrc.end (), std::regex ("^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$")))
++            {
++              // Ipv4 address
++              id.ipClient = Ipv4Address (ipSrc.c_str ());
++            }
++          else
++            {
++              // Ipv6 address
++              id.ipClient = Ipv6Address (ipSrc.c_str ());
++            }
++          id.portClient = portSrc;
++          if (std::regex_search (ipDest.begin (), ipDest.end (), std::regex ("^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$")))
++            {
++              id.ipServer = Ipv4Address (ipDest.c_str ());
++            }
++          else
++            {
++              id.ipServer = Ipv6Address (ipDest.c_str ());
++            }
++          id.portServer = portDest;
++
++          // If the packet is from server to client then ip and port numbers for source and destination will be reversed
++          m_connId idReverse;
++          idReverse.ipClient = id.ipServer;
++          idReverse.portClient = id.portServer;
++          idReverse.ipServer = id.ipClient;
++          idReverse.portServer = id.portClient;
++          // if the ip and port number for packet are not present in map then insert it as new connection
++          if (m_connMap.find (id) == m_connMap.end () && m_connMap.find (idReverse) == m_connMap.end ())
++          {
++            m_connInfo info;
++            info.startTime = Seconds (packetTime);
++            info.packetC2S = true;
++            info.packetCount = 0;
++            info.byteCount = 0;
++            info.currTime = Seconds (packetTime);
++            info.totByteCount = 0;
++            m_connMap[id] = info;
++          }
++
++          if (packetSize == 0)
++          {
++            // ignore 0 byte packets
++            continue;
++          }
++          ProcessPacket (id, packetSize, packetTime, frameNum);
++        }
++    }
++  else
++    {
++      std::cerr << "Error opening tcpPackets.csv file.\n";
++      exit (1);
++    }
++  infile.close ();
++}
++
++void
++TraceReplayHelper::PrintTraceFile ()
++{
++  std::ofstream file;
++  file.open ("traceFile.txt");
++  // Comments for trace file
++  file << "# ------------------------------------------------\n";
++  file << "# Trace file: traceFile.txt\n";
++  file << "# File structure:-\n";
++  file << "# Number of client\n";
++  file << "# For each client {\n";
++  file << "# \tNumber of connection\n";
++  file << "# \tFor each connection {\n";
++  file << "# \t\tIp_Client\tPort_Client\tIp_server\tPort_Server\tStart_Time\n";
++  file << "# \t\tNumber of packets from client to server\n";
++  file << "# \t\tFor each packet from client to server {\n";
++  file << "# \t\t\tPacket_Size\tPacket_Delay\n";
++  file << "# \t\t}\n";
++  file << "# \t\tNumber of client request\n";
++  file << "# \t\tFor each request {\n";
++  file << "# \t\t\tNumber of packets to send before going to receive mode\n";
++  file << "# \t\t}\n";
++  file << "# \t\tNumber of server response\n";
++  file << "# \t\tFor each response {\n";
++  file << "# \t\t\tNumber of bytes to receive before going to send mode\n";
++  file << "# \t\t}\n";
++  file << "# \t\tNumber of packet from server to client\n";
++  file << "# \t\tFor each packet from server to client {\n";
++  file << "# \t\t\tPacket_Size\tPacket_Delay\n";
++  file << "# \t\t}\n";
++  file << "# \t\tNumber of server response\n";
++  file << "# \t\tFor each response {\n";
++  file << "# \t\t\tNumber of packets to send before going to receive mode\n";
++  file << "# \t\t}\n";
++  file << "# \t\tNumber of client request\n";
++  file << "# \t\tFor each request {\n";
++  file << "# \t\t\tNumber of bytes to receive before going to send mode\n";
++  file << "# \t\t}\n";
++  file << "# \t}\n";
++  file << "# }\n";
++  file << "# ------------------------------------------------\n";
++  // Print number of connection
++  file << m_connMap.size () << std::endl;
++  // Iterate over each connection and print details
++  std::map<m_connId, m_connInfo>::iterator it;
++  for (it = m_connMap.begin (); it != m_connMap.end (); it++)
++    {
++      // Update the final packet and byte counts.
++      if (it->second.packetC2S && it->second.totByteCount > 0)
++        {
++          it->second.numReq.push_back (it->second.packetCount);
++          it->second.expByteClient.push_back (it->second.byteCount);
++        }
++      else if (it->second.totByteCount > 0)
++        {
++          it->second.numRep.push_back (it->second.packetCount);
++          it->second.expByteServer.push_back (it->second.byteCount);
++        }
++
++      if (Ipv4Address::IsMatchingType ((it->first).ipClient))
++        {
++          file << Ipv4Address::ConvertFrom ((it->first).ipClient) << "\t";
++        }
++      else
++        {
++          file << Ipv6Address::ConvertFrom ((it->first).ipClient) << "\t";
++        }
++      file << (it->first).portClient << "\t";
++      if (Ipv4Address::IsMatchingType ((it->first).ipServer))
++        {
++          file << Ipv4Address::ConvertFrom ((it->first).ipServer) << "\t";
++        }
++      else
++        {
++          file << Ipv6Address::ConvertFrom ((it->first).ipServer) << "\t";
++        }
++      file << (it->first).portServer << "\t";
++      file << (it->second).startTime.GetSeconds () << std::endl;
++
++      uint32_t numPacket = (it->second).clientPackets.size ();
++      file << numPacket << std::endl;
++      for (uint32_t i = 0; i < numPacket; i++)
++        {
++          // print details of each packet
++          TraceReplayPacket packet = (it->second).clientPackets[i];
++          file << packet.GetSize () << "\t" << (packet.GetDelay ()).GetSeconds () << std::endl;
++          if ((packet.GetDelay ()).IsStrictlyPositive ())
++            {
++              uint32_t numParallelCon = packet.GetNumParallelConnection ();
++              file << numParallelCon << std::endl;
++              for (uint32_t j = 0; j < numParallelCon; j++)
++                {
++                  std::pair<uint16_t, uint16_t> connId = packet.GetConnectionId (j);
++                  file << connId.first << "\t" << connId.second << "\t" << packet.GetByteCount (j) << std::endl;
++                }
++            }
++        }
++
++      uint32_t size = (it->second).numReq.size ();
++      file << size << std::endl;
++      for (uint32_t i = 0; i < size; i++)
++        {
++          file << (it->second).numReq[i] << std::endl;
++        }
++
++      size = (it->second).expByteServer.size ();
++      file << size << std::endl;
++      for (uint32_t i = 0; i < size; i++)
++        {
++          file << (it->second).expByteServer[i] << std::endl;
++        }
++
++      numPacket = (it->second).serverPackets.size ();
++      file << numPacket << std::endl;
++      for (uint32_t i = 0; i < numPacket; i++)
++        {
++          // print details of each packet
++          TraceReplayPacket packet = (it->second).serverPackets[i];
++          file << packet.GetSize () << "\t" << (packet.GetDelay ()).GetSeconds () << std::endl;
++          if ((packet.GetDelay ()).IsStrictlyPositive ())
++            {
++              uint32_t numParallelCon = packet.GetNumParallelConnection ();
++              file << numParallelCon << std::endl;
++              for (uint32_t j = 0; j < numParallelCon; j++)
++                {
++                  std::pair<uint16_t, uint16_t> connId = packet.GetConnectionId (j);
++                  file << connId.first << "\t" << connId.second << "\t" << packet.GetByteCount (j) << std::endl;
++                }
++            }
++        }
++
++      size = (it->second).numRep.size ();
++      file << size << std::endl;
++      for (uint32_t i = 0; i < size; i++)
++        {
++          file << (it->second).numRep[i] << std::endl;
++        }
++
++      size = (it->second).expByteClient.size ();
++      file << size << std::endl;
++      for (uint32_t i = 0; i < size; i++)
++        {
++          file << (it->second).expByteClient[i] << std::endl;
++        }
++    }
++  file.close ();
++}
++
++void
++TraceReplayHelper::DeleteTmpFiles ()
++{
++  // Remove all the temporary files
++  std::remove ("httpRequestFile");
++  std::remove ("tcpPackets.csv");
++  std::remove ("tcpTimeout");
++}
++
++void
++TraceReplayHelper::ConvertPcapToTrace ()
++{
++  RunCommands ();
++  ProcessHttpList ();
++  ProcessTimeoutList ();
++  ProcessPacketList ();
++  PrintTraceFile ();
++  DeleteTmpFiles ();
++}
++
++std::string
++TraceReplayHelper::CheckRegex (std::ifstream& infile, std::regex reg)
++{
++  std::string line;
++  while (getline (infile, line))
++    {
++      if (std::regex_search (line.begin (), line.end (), std::regex ("^#")))
++        {
++          continue;
++        }
++      else
++        {
++          break;
++        }
++    }
++  if (std::regex_search (line.begin (), line.end (), reg))
++    {
++      return line;
++    }
++  else
++    {
++      std::cerr << "Input trace file is corrupted!";
++      exit (1);
++    }
++}
++
++void
++TraceReplayHelper::Install (Ptr<Node> clientNode, Ptr<Node> remoteNode, Address remoteAddress)
++{
++  NS_LOG_FUNCTION (this);
++
++  std::string filename = "";
++  if (std::ifstream (m_pcapPath.c_str ()))
++    {
++      // Valid pcap file. Overwrite trace file (if present)
++      ConvertPcapToTrace ();
++      filename = "traceFile.txt";
++    }
++  else if (std::ifstream (m_traceFilePath.c_str ()))
++    {
++      // Valid trace file.
++      filename = m_traceFilePath;
++    }
++  else
++    {
++      std::cerr << "No valid pcap or trace file.\n";
++      exit (1);
++    }
++
++  std::ifstream infile (filename.c_str ());
++  if (!infile.is_open ())
++    {
++      std::cerr << "Error opening trace file.\n";
++      exit (1);
++    }
++
++  uint32_t numConn = 0; // number of connection per client
++  std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++  std::istringstream iss (line);
++  iss >> numConn;
++
++  // for each connection read the data and initialize client-server connection pair
++  for (uint32_t j = 0; j < numConn; j++)
++    {
++      // real ip and port numbers
++      std::string ipClientTmp = "";
++      uint16_t portClient = 0;
++      std::string ipServerTmp = "";
++      uint16_t portServer = 0;
++      double startTime = 0.0;
++      {
++        std::string line = CheckRegex (infile, std::regex ("^*\t[0-9]+\t*[0-9]+\t[0-9]+[.]?[0-9]*$"));
++        std::istringstream iss (line);
++        iss >> ipClientTmp >> portClient >> ipServerTmp >> portServer >> startTime;
++      }
++
++      Address ipClient;
++      if (std::regex_search (ipClientTmp.begin (), ipClientTmp.end (), std::regex ("^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$")))
++        {
++          ipClient = Ipv4Address (ipClientTmp.c_str ());
++        }
++      else
++        {
++          ipClient = Ipv6Address (ipClientTmp.c_str ());
++        }
++
++      Address ipServer;
++      if (std::regex_search (ipServerTmp.begin (), ipServerTmp.end (), std::regex ("^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$")))
++        {
++          ipServer = Ipv4Address (ipServerTmp.c_str ());
++        }
++      else
++        {
++          ipServer = Ipv6Address (ipServerTmp.c_str ());
++        }
++
++      // Each connections will get port number sequentially starting from m_portNumber.
++      uint16_t portNumber = m_portNumber + j;
++      Address address;
++      if (Ipv4Address::IsMatchingType (remoteAddress) == true)
++        {
++          address = InetSocketAddress (Ipv4Address::ConvertFrom (remoteAddress), portNumber);
++        }
++      else
++        {
++          address = Inet6SocketAddress (Ipv6Address::ConvertFrom (remoteAddress), portNumber);
++        }
++      // Client to server connection
++      {
++        uint16_t numPacket = 0;
++        {
++          std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++          std::istringstream iss (line);
++          iss >> numPacket;
++        }
++        {
++          std::vector<TraceReplayPacket> packetList;
++          for (uint16_t k = 0; k < numPacket; k++)
++            {
++              TraceReplayPacket packet;
++              uint32_t packetSize = 0;
++              double delay = 0.0;
++              {
++                std::string line = CheckRegex (infile, std::regex ("^[0-9]+\t[0-9]+[.]?[0-9]*$"));
++                std::istringstream iss (line);
++                iss >> packetSize >> delay;
++              }
++              if (delay > 0)
++                {
++                  uint32_t n = 0; // number of parallel connection
++                  {
++                    std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++                    std::istringstream iss (line);
++                    iss >> n;
++                  }
++                  for (uint32_t i = 0; i < n; i++)
++                    {
++                      uint16_t srcPort = 0;
++                      uint16_t dstPort = 0;
++                      uint32_t count = 0;
++                      {
++                        std::string line = CheckRegex (infile, std::regex ("^[0-9]+\t[0-9]+\t[0-9]+$"));
++                        std::istringstream iss (line);
++                        iss >> srcPort >> dstPort >> count;
++                      }
++                      packet.AddParallelConnection (srcPort, dstPort, count);
++                    }
++                }
++
++              packet.SetSize (packetSize);
++              packet.SetDelay (Seconds (delay));
++              packetList.push_back (packet);
++            }
++
++          uint32_t nRequest = 0; // number of requests
++          {
++            std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++            std::istringstream iss (line);
++            iss >> nRequest;
++          }
++          std::vector<uint32_t> numReq;
++          for (uint32_t k = 0; k < nRequest; k++)
++            {
++              uint32_t count = 0; // number of packets to send per request
++              {
++                std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++                std::istringstream iss (line);
++                iss >> count;
++              }
++              numReq.push_back (count);
++            }
++
++          uint32_t nReply = 0; // number of Reply from server
++          {
++            std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++            std::istringstream iss (line);
++            iss >> nReply;
++          }
++          std::vector<uint32_t> expByte;
++          for (uint32_t k = 0; k < nReply; k++)
++            {
++              uint32_t count; // number of total bytes to receive, as reply, for each request
++              {
++                std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++                std::istringstream iss (line);
++                iss >> count;
++              }
++              expByte.push_back (count);
++            }
++
++          // Initialize TraceReplayClient
++          Ptr<TraceReplayClient> client = CreateObject<TraceReplayClient> ();
++          client->SetConnectionId (ipClient, portClient, ipServer, portServer);
++          client->Setup (address, m_dataRate, numReq, expByte, packetList);
++          // Start time of connection is :
++          // Actual start time taken from trace file +
++          // offset set by user +
++          // jitter to avoid synchronization (max 1 second)
++          client->SetStartTime (Seconds (startTime) + m_startTimeOffset + MilliSeconds (m_startTimeJitter->GetValue ()));
++          client->SetStopTime (Seconds (m_stopTime));
++          clientNode->AddApplication (client);
++        }
++      }
++      // Server to client connection
++      {
++        uint16_t numPacket = 0;
++        {
++          std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++          std::istringstream iss (line);
++          iss >> numPacket;
++        }
++        {
++          std::vector<TraceReplayPacket> packetList;
++          for (uint16_t k = 0; k < numPacket; k++)
++            {
++              TraceReplayPacket packet;
++              uint32_t packetSize = 0;
++              double delay = 0.0;
++              {
++                std::string line = CheckRegex (infile, std::regex ("^[0-9]+\t[0-9]+[.]?[0-9]*$"));
++                std::istringstream iss (line);
++                iss >> packetSize >> delay;
++              }
++              if (delay > 0)
++                {
++                  uint32_t n = 0; // number of parallel connection
++                  {
++                    std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++                    std::istringstream iss (line);
++                    iss >> n;
++                  }
++                  for (uint32_t i = 0; i < n; i++)
++                    {
++                      uint16_t srcPort = 0;
++                      uint16_t dstPort = 0;
++                      uint32_t count = 0;
++                      {
++                        std::string line = CheckRegex (infile, std::regex ("^[0-9]+\t[0-9]+\t[0-9]+$"));
++                        std::istringstream iss (line);
++                        iss >> srcPort >> dstPort >> count;
++                      }
++                      packet.AddParallelConnection (srcPort, dstPort, count);
++                    }
++                }
++
++              packet.SetSize (packetSize);
++              packet.SetDelay (Seconds (delay));
++              packetList.push_back (packet);
++            }
++
++          uint32_t nReply = 0; // number of reply
++          {
++            std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++            std::istringstream iss (line);
++            iss >> nReply;
++          }
++          std::vector<uint32_t> numRep;
++          for (uint32_t k = 0; k < nReply; k++)
++            {
++              uint32_t count; // number of packets to send in each reply
++              {
++                std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++                std::istringstream iss (line);
++                iss >> count;
++              }
++              numRep.push_back (count);
++            }
++
++          uint32_t nRequest = 0; // number of request
++          std::vector<uint32_t> expByte;
++          {
++            std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++            std::istringstream iss (line);
++            iss >> nRequest;
++          }
++          for (uint32_t k = 0; k < nRequest; k++)
++            {
++              uint32_t count = 0; // total bytes expected in each request
++              {
++                std::string line = CheckRegex (infile, std::regex ("^[0-9]+$"));
++                std::istringstream iss (line);
++                iss >> count;
++              }
++              expByte.push_back (count);
++            }
++
++          // Initiliaze TraceReplayServer
++          Ptr<TraceReplayServer> server = CreateObject<TraceReplayServer> ();
++          server->SetConnectionId (ipClient, portClient, ipServer, portServer);
++          server->Setup (address, m_dataRate, numRep, expByte, packetList);
++          server->SetStartTime (Seconds (0.0));
++          server->SetStopTime (Seconds (m_stopTime));
++          remoteNode->AddApplication (server);
++        }
++      }
++    }
++  infile.close ();
++}
++} // namespace ns3
+\ No newline at end of file
+Index: src/applications/helper/trace-replay-helper.h
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/helper/trace-replay-helper.h
+@@ -0,0 +1,253 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ */
++
++#ifndef TRACE_REPLAY_HELPER_H
++#define TRACE_REPLAY_HELPER_H
++
++#include <iostream>
++#include <fstream>
++#include <sstream>
++#include <vector>
++#include <cstdlib>
++#include <ctime>
++#include <map>
++#include <regex>
++
++namespace ns3 {
++
++class TraceReplayPacket;
++class Address;
++
++/**
++ * \brief TraceReplayHelper make it easier to analyse input pcap file
++ * and initialize connections between TraceReplayClient and TraceReplayServer
++ *
++ */
++class TraceReplayHelper
++{
++public:
++  /**
++   * \brief TraceReplayHelper make it easier to analyse input pcap file
++   * and initialize connections between TraceReplayClient and TraceReplayServer
++   *
++   * \param DataRate data rate for client and server
++   */
++  TraceReplayHelper (DataRate dataRate);
++  ~TraceReplayHelper (void);
++
++  /**
++   * \brief This method sets the input the pcap file. It is optional if the trace file is provided.
++   * If both pcap and trace file are provided, then trace file will be ignored,
++   * and new trace file will be created from the input pcap.
++   * For simulating large number of nodes, it is advisable to first create a trace file from running
++   * simulation for a single node and then use 'SetTraceFile' to provide trace file (skipping 'SetPcap').
++   * This would save the pcap processing time for each nodes.
++   *
++   * \param pcap File name of the input pcap
++   */
++  void SetPcap (std::string pcap);
++
++  /**
++   * \brief This method sets the input the trace file.
++   * TraceReplay will use this trace file, instead of creating new
++   * trace file from input pcap.
++   *
++   * \param traceFile File name of the input trace file
++   */
++  void SetTraceFile (std::string traceFile);
++
++  /**
++   * \brief Assign a fixed random variable stream number to the random variables used by this model.
++   *
++   * Use to avoid synchronization between multiple clients start time.
++   *
++   * \param stream first stream index to use
++   *
++   * \return the number of stream indices assigned by this model
++   */
++  int64_t AssignStreams (int64_t stream);
++
++  /**
++   * \brief This methods sets the stop time for the connection.
++   *
++   * \param time Stop time for application
++   */
++  void SetStopTime (Time time);
++
++  /**
++   * \brief This methods sets the start time offset for the connection.
++   *
++   * Start time for each connection is read from trace file. This function will set additional
++   * offset for start time.
++   *
++   * \param time Start time offset for application
++   */
++  void SetStartTimeOffset (Time time);
++
++  /**
++   * \brief This methods sets the starting port number for client.
++   *
++   * All the connections for client will start from this port number
++   *
++   * \param port Starting port number for client
++   */
++  void SetPortNumber (uint16_t port);
++
++  /**
++   * \brief Creates the trace file, if not present, and initializes all client-server pairs
++   *
++   * This method reads the traceFile.txt file and initializes all client-server connections.
++   *
++   * \param clientNode pointer to client node
++   * \param remoteNode pointer to server node
++   * \param remoteAddress Server Ip address
++   *
++   */
++  void Install (Ptr<Node> clientNode, Ptr<Node> remoteNode, Address remoteAddress);
++
++private:
++  std::string     m_pcapPath;       //!< Path to input pcap file
++  std::string     m_traceFilePath;  //!< Path to input trace file
++  Time            m_stopTime;       //!< Stop time
++  Time            m_startTimeOffset; //!< Start time offset
++  DataRate        m_dataRate;       //!< Data Rate
++  uint16_t        m_portNumber;     //!< Starting port number for connections
++  struct          m_connId          //!< Struct to uniquely identify a connection
++  {
++    Address       ipClient;         //!< Real IP address of client
++    uint16_t      portClient;       //!< Real port number of client
++    Address       ipServer;         //!< Real IP address of server
++    uint16_t      portServer;       //!< Real port number of server
++    /**
++     * \brief < opertator for m_connId.
++     */
++    bool operator< (const m_connId& rhs) const;
++  };
++  struct          m_connInfo        //!< Struct containing details about the connection
++  {
++    Time            startTime;      //!< Start time of connections
++    Time            currTime;       //!< Time of the last packet
++    uint32_t        packetCount;    //!< Total count of packets in current cycle
++    uint32_t        byteCount;      //!< Total count of bytes in current cycle
++    uint32_t        totByteCount;   //!< Total count of bytes seen in the connection
++    bool            packetC2S;      //!< Indicate whether last packet was client to server or not
++
++    std::vector<TraceReplayPacket>    clientPackets;    //!< List of client's packet
++    std::vector<TraceReplayPacket>    serverPackets;    //!< List of server's packet
++    std::vector<uint32_t>             numReq;           //!< List of #packets to send as request
++    std::vector<uint32_t>             expByteClient;    //!< List of #byte expected to receive as reply
++    std::vector<uint32_t>             numRep;           //!< List of #packets to send as reply
++    std::vector<uint32_t>             expByteServer;    //!< List of #byte expected to receive as request
++  };
++
++  std::map<uint32_t, bool>        m_httpReqMap;     //!< list of frame numbers for packet which are http request
++  std::map<uint32_t, bool>        m_timeoutMap;     //!< list of frame numbers for packet which were timed out
++  std::map<m_connId, m_connInfo>  m_connMap;        //!< list of all tcp connections with details
++  Ptr<RandomVariableStream>       m_startTimeJitter;//!< random number stream for start time
++
++  /**
++   * \brief Converts the input pcap file to formatted trace file (tarceFile.txt)
++   *
++   */
++  void ConvertPcapToTrace ();
++
++  /**
++   * \brief Runs the necessary tshark commands to read the input pcap file
++   *
++   */
++  void RunCommands ();
++
++  /**
++   * \brief Processes the httpRequest file to make list of http request packets in pcap
++   *
++   */
++  void ProcessHttpList ();
++
++  /**
++   * \brief Processes the timeout file to make list of timed out packets in pcap
++   *
++   */
++  void ProcessTimeoutList ();
++
++  /**
++   * \brief Reads each packet details, calculate delay and maps it to a tcp connection
++   *
++   * If the ip and port numbers for packet is not present in map, then it's a packet from
++   * new connection, therefore insert conn_id into map
++   *
++   */
++  void ProcessPacketList ();
++
++  /**
++   * \brief Prints the trace file
++   *
++   * Any line starting with '#' is comment.
++   *
++   */
++  void PrintTraceFile ();
++
++  /**
++   * \brief Delets all the temporary files
++   *
++   */
++  void DeleteTmpFiles ();
++
++  /**
++   * \brief Calculates delay for the packet
++   *
++   *
++   * \param frameNum frame number of the packet
++   * \param timeOut True if packet was timed out
++   * \param httpReq True if packet is a http request
++   * \param currTime Time of the last packet in the connection
++   * \param packetTime Packet time
++   *
++   * \returns Calculated delay for the packet
++   */
++  double CalculatePacketDelay (uint32_t frameNum, bool timeOut, bool httpReq, double currTime, double packetTime);
++
++  /**
++   * \brief Matches the packet with the its connection and update connection details
++   *
++   *
++   * \param id m_connId of the packet
++   * \param size size of the packet
++   * \param time time of the packet
++   * \param frameNum frame number of the packet
++   *
++   */
++  void ProcessPacket (m_connId id, uint32_t size, double time, uint32_t frameNum);
++  /**
++   * \brief Checks the input file for regular expression match.
++   * Skips the comment lines (starting with '#').
++   *
++   *
++   * \param infile input file stream
++   * \param reg Regular expression
++   *
++   * \returns line (string) if regex matches
++   */
++  std::string CheckRegex (std::ifstream& infile, std::regex reg);
++};
++
++} // namespace ns3
++#endif /* TRACE_REPLAY_HELPER_H */
+\ No newline at end of file
+Index: src/applications/model/trace-replay-client.cc
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/model/trace-replay-client.cc
+@@ -0,0 +1,364 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ */
++
++#include "ns3/log.h"
++#include "ns3/address.h"
++#include "ns3/inet-socket-address.h"
++#include "ns3/inet6-socket-address.h"
++#include "ns3/packet-socket-address.h"
++#include "ns3/node.h"
++#include "ns3/nstime.h"
++#include "ns3/data-rate.h"
++#include "ns3/random-variable-stream.h"
++#include "ns3/socket.h"
++#include "ns3/simulator.h"
++#include "ns3/socket-factory.h"
++#include "ns3/packet.h"
++#include "ns3/uinteger.h"
++#include "ns3/tcp-socket-factory.h"
++#include "ns3/string.h"
++#include "ns3/pointer.h"
++#include "ns3/trace-replay-utility.h"
++#include "trace-replay-client.h"
++
++namespace ns3 {
++NS_LOG_COMPONENT_DEFINE ("TraceReplayClient");
++NS_OBJECT_ENSURE_REGISTERED (TraceReplayClient);
++
++TypeId TraceReplayClient::GetTypeId (void)
++{
++  static TypeId tid = TypeId ("ns3::TraceReplayClient")
++    .SetParent<Application> ()
++    .SetGroupName ("Applications")
++    .AddConstructor<TraceReplayClient> ()
++  ;
++  return tid;
++}
++
++TraceReplayClient::TraceReplayClient ()
++  : m_socket (0),
++    m_peer (),
++    m_dataRate (0),
++    m_sendEvent (),
++    m_connected (false),
++    m_totRecByte (0),
++    m_totExpByte (0),
++    m_totByteCount (0)
++{
++  NS_LOG_FUNCTION (this);
++}
++
++TraceReplayClient::~TraceReplayClient ()
++{
++  NS_LOG_FUNCTION (this);
++  m_numReq.clear ();
++  m_expByte.clear ();
++  m_packetList.clear ();
++  m_parallelConnList.clear ();
++  m_socket = 0;
++}
++
++void
++TraceReplayClient::StartApplication (void)
++{
++  NS_LOG_FUNCTION (this);
++  m_socket = Socket::CreateSocket (GetNode (), TcpSocketFactory::GetTypeId ());
++  m_connected = true;
++  if (Inet6SocketAddress::IsMatchingType (m_peer))
++    {
++      m_socket->Bind6 ();
++    }
++  else if (InetSocketAddress::IsMatchingType (m_peer))
++    {
++      m_socket->Bind ();
++    }
++  m_socket->Connect (m_peer);
++  m_socket->SetConnectCallback (
++    MakeCallback (&TraceReplayClient::ConnectionSucceeded, this),
++    MakeCallback (&TraceReplayClient::ConnectionFailed, this));
++}
++
++void
++TraceReplayClient::StopApplication (void)
++{
++  NS_LOG_FUNCTION (this);
++  m_connected = false;
++  if (m_sendEvent.IsRunning ())
++    {
++      Simulator::Cancel (m_sendEvent);
++    }
++  if (m_socket)
++    {
++      m_socket->Close ();
++    }
++}
++
++void TraceReplayClient::ConnectionSucceeded (Ptr<Socket> socket)
++{
++  NS_LOG_FUNCTION (this);
++  NS_LOG_LOGIC ("TraceReplayClient Connection succeeded");
++  m_connected = true;
++  ScheduleTx ();
++}
++
++void TraceReplayClient::ConnectionFailed (Ptr<Socket> socket)
++{
++  NS_LOG_FUNCTION (this);
++  NS_LOG_LOGIC ("TraceReplayClient, Connection Failed");
++}
++
++void
++TraceReplayClient::DoDispose (void)
++{
++  NS_LOG_FUNCTION (this);
++
++  m_socket = 0;
++  // chain up
++  Application::DoDispose ();
++}
++
++void
++TraceReplayClient::DoInitialize ()
++{
++  NS_LOG_FUNCTION (this);
++  for (uint32_t index = 0; index < GetNode ()->GetNApplications (); index++)
++    {
++      Ptr <TraceReplayClient> app = DynamicCast <TraceReplayClient>  (GetNode ()->GetApplication (index));
++      if (app && app->GetIpServer () == m_ipServer)
++        {
++          m_parallelConnList.push_back (app);
++        }
++    }
++  Application::DoInitialize ();
++}
++
++Address
++TraceReplayClient::GetIpServer () const
++{
++  NS_LOG_FUNCTION (this);
++  return m_ipServer;
++}
++
++uint16_t
++TraceReplayClient::GetPortServer () const
++{
++  NS_LOG_FUNCTION (this);
++  return m_portServer;
++}
++
++uint16_t
++TraceReplayClient::GetPortClient () const
++{
++  NS_LOG_FUNCTION (this);
++  return m_portClient;
++}
++
++uint32_t
++TraceReplayClient::GetTotalByteCount () const
++{
++  NS_LOG_FUNCTION (this);
++  return m_totByteCount;
++}
++
++void
++TraceReplayClient::SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer)
++{
++  NS_LOG_FUNCTION (this);
++  m_ipClient = ipClient;
++  m_ipServer = ipServer;
++  m_portClient = portClient;
++  m_portServer = portServer;
++}
++
++void
++TraceReplayClient::Setup (Address address, DataRate dataRate, std::vector<uint32_t> numReq, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList)
++{
++  NS_LOG_FUNCTION (this);
++  m_peer = address;
++  m_dataRate = dataRate;
++
++  // If the conneciton does not have any packet then numReq will be empty.
++  // Insert 0 to indicate client that it does not have to send any packet
++  m_numReq = numReq;
++  if (m_numReq.empty ())
++    {
++      m_numReq.push_back (0);
++    }
++  m_numReqIt = m_numReq.begin ();
++
++  // If the conneciton does not have any packet then expByte will be empty.
++  // Insert 0 to indicate client that it does not have to receive any packet
++  m_expByte = expByte;
++  if (m_expByte.empty ())
++    {
++      m_expByte.push_back (0);
++    }
++  m_expByteIt = m_expByte.begin ();
++
++  m_packetList = packetList;
++  m_packetListIt = m_packetList.begin ();
++}
++
++void
++TraceReplayClient::SendPacket (TraceReplayPacket packet)
++{
++  NS_LOG_FUNCTION (this);
++
++  if ((packet.GetDelay ()).IsStrictlyPositive ())
++    {
++      // If dalay > 0 seconds, check all parallel connections for progress
++      bool okToSend = true;
++      for (uint32_t i = 0; i < m_parallelConnList.size (); i++)
++        {
++          uint32_t expected = packet.GetByteCount (m_parallelConnList[i]->GetPortClient (), m_parallelConnList[i]->GetPortServer ());
++          uint32_t current = m_parallelConnList[i]->GetTotalByteCount ();
++          if (current < expected)
++            {
++              okToSend = false;
++              break;
++            }
++        }
++      if (!okToSend)
++        {
++          // Retry to send after 0.0001 seconds
++          Time tNext (Seconds (0.00001));
++          NS_LOG_LOGIC ("Parallel connections have not made desired progress. Scheduling next event at time "
++            << (Simulator::Now () + tNext));
++          Simulator::Schedule (tNext, &TraceReplayClient::SendPacket, this, packet);
++          return;
++        }
++    }
++
++  if (m_socket->GetTxAvailable () < packet.GetSize ())
++    {
++      // Not enough buffer available
++      Time tNext = m_dataRate.CalculateBytesTxTime (packet.GetSize ());
++      NS_LOG_LOGIC ("Buffer not available. Scheduling next event at time " << (Simulator::Now () + tNext));
++      Simulator::Schedule (tNext, &TraceReplayClient::SendPacket, this, packet);
++      return;
++    }
++
++  // Send packet
++  NS_LOG_LOGIC ("ClientIp " << m_ipClient << " ClientPort " << m_portClient << " sending packet of size " << packet.GetSize ());
++  Ptr<Packet> packetTmp = Create<Packet> (packet.GetSize ());
++  m_socket->Send (packetTmp);
++
++  // Update the total byte count for this connection
++  m_totByteCount += packet.GetSize ();
++  if (*m_numReqIt > 0)
++    {
++      // more packets are in send queue, schedule next packet
++      ScheduleTx ();
++    }
++  else
++    {
++      // update expected number of total bytes to be received
++      m_totExpByte = *(m_expByteIt++);
++      m_totRecByte = 0;
++      // No more packets to receive. Close connection
++      if (m_totExpByte == 0)
++        {
++          m_socket->Close ();
++          m_connected = false;
++          return;
++        }
++      // go to receive mode
++      m_socket->SetRecvCallback (MakeCallback (&TraceReplayClient::ReceivePacket, this));
++    }
++}
++
++void
++TraceReplayClient::ScheduleTx (void)
++{
++  NS_LOG_FUNCTION (this);
++  if (m_connected && *m_numReqIt > 0)
++    {
++      // Decrement number of packets to be send
++      *m_numReqIt -= 1;
++
++      TraceReplayPacket packet = *(m_packetListIt++);
++      if ((packet.GetDelay ()).IsStrictlyPositive ())
++        {
++          // schedule packet after 'delay'
++          Time tNext = packet.GetDelay () + m_dataRate.CalculateBytesTxTime (packet.GetSize ());
++          NS_LOG_LOGIC ("Packet sending scheduled at time " << (Simulator::Now () + tNext));
++          m_sendEvent = Simulator::Schedule (tNext, &TraceReplayClient::SendPacket, this, packet);
++        }
++      else
++        {
++          SendPacket (packet);
++          return;
++        }
++    }
++  else if (*m_numReqIt == 0)
++    {
++      // No more packet to send, update expected number total bytes to be received
++      m_totExpByte = *(m_expByteIt++);
++      m_totRecByte = 0;
++      if (m_totExpByte == 0)
++        {
++          // No more packet to send or receive
++          m_socket->Close ();
++          m_connected = false;
++        }
++      else
++        {
++          // go to receive mode
++          m_socket->SetRecvCallback (MakeCallback (&TraceReplayClient::ReceivePacket, this));
++        }
++    }
++}
++
++void
++TraceReplayClient::ReceivePacket (Ptr<Socket> socket)
++{
++  NS_LOG_FUNCTION (this);
++  // receive packet
++  Ptr<Packet> packet;
++  Address from;
++  while ((packet = socket->RecvFrom (from)))
++    {
++      if (packet->GetSize () > 0)
++        {
++          NS_LOG_LOGIC ("ClientIp " << m_ipClient << " ClientPort " << m_portClient << " received packet of size " << packet->GetSize () << " at " << Simulator::Now ());
++          // update total bytes received
++          m_totRecByte += packet->GetSize ();
++          m_totByteCount += packet->GetSize ();
++        }
++    }
++  if (m_totRecByte < m_totExpByte)
++    {
++      // keep receiving packet
++      m_socket->SetRecvCallback (MakeCallback (&TraceReplayClient::ReceivePacket, this));
++    }
++  else if (m_numReqIt != m_numReq.end () && ++m_numReqIt != m_numReq.end ())
++    {
++      // go to send mode
++      ScheduleTx ();
++    }
++  else
++    {
++      // No more packet to send or receive
++      StopApplication ();
++    }
++}
++} // namespace ns3
+\ No newline at end of file
+Index: src/applications/model/trace-replay-client.h
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/model/trace-replay-client.h
+@@ -0,0 +1,202 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ */
++
++#ifndef TRACE_REPLAY_CLIENT_H
++#define TRACE_REPLAY_CLIENT_H
++
++#include "ns3/address.h"
++#include "ns3/application.h"
++#include "ns3/event-id.h"
++#include "ns3/ptr.h"
++#include "ns3/data-rate.h"
++#include <vector>
++#include <cstdlib>
++#include <map>
++
++namespace ns3 {
++
++class Address;
++class Socket;
++class TraceReplayPacket;
++
++/**
++ * \ingroup applications
++ * \class TraceReplayClient
++ * \brief TraceReplayClient class acts as a tcp client for TraceReplay.
++ *
++ * TraceReplayClient acts as a tcp client, which initializes connection to
++ * TraceReplayServer and communicates with it in a request-reply mode.
++ * In each cycle, it sends *m_numReq number of packets, from m_packetList,
++ * as request and waits for server to send *m_expByte as reply.
++ * Before sending a packet, if the delay for the packet > 0 seconds,
++ * it also checks the progress of all parallel connections
++ * between same client IP and server IP.
++ * If any of the parallel connection has not made sufficient progress
++ * then it reschedules the packet for later time,
++ * otherwise continues normal operation.
++ *
++ */
++
++class TraceReplayClient : public Application
++{
++
++public:
++  /**
++   * \brief Get the type ID.
++   * \return the object TypeId
++   */
++  static TypeId GetTypeId (void);
++
++  TraceReplayClient ();
++
++  ~TraceReplayClient ();
++
++  /**
++   * \brief This method initializes the connection's ids (real ip and port address of client and server).
++   *
++   * \param ipClient real ip address of client
++   * \param portClient real port number of client
++   * \param ipServer real ip address of corresponding server
++   * \param portServer real port number of corresponding server
++   */
++  void SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer);
++
++  /**
++   * \brief This method initializes the client object.
++   *
++   * \param address peer address
++   * \param dataRate The datarate of the sever
++   * \param numReq Vector containing number of packet to send in each request
++   * \param expByte Vector containing the number of bytes expected as reply for each request
++   * \param packetList Vector containing client's TraceReplayPacket
++   */
++  void Setup (Address address, DataRate dataRate, std::vector<uint32_t> numReq, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList);
++
++  /**
++   * \brief Returns real Ip address of server in the original connection
++   *
++   * \returns Address of server in trace file
++   */
++  Address GetIpServer (void) const;
++
++  /**
++   * \brief Returns port number of server in the original connection
++   *
++   * \returns Port number of server in trace file
++   */
++  uint16_t GetPortServer (void) const;
++
++  /**
++   * \brief Returns port number of client in the original connection
++   *
++   * \returns Port number of client in trace file
++   */
++  uint16_t GetPortClient (void) const;
++
++  /**
++   * \brief Returns total number of bytes seen in the connection (sent + received)
++   *
++   * \returns Total number of bytes seen in the connection (sent + received)
++   */
++  uint32_t GetTotalByteCount (void) const;
++
++protected:
++  virtual void DoDispose (void);
++
++private:
++  // inherited from Application base class
++  virtual void StartApplication (void); // Called at time specified by Start
++  virtual void StopApplication (void);  // Called at time specified by Stop
++  virtual void DoInitialize (void);
++
++  /**
++   * \brief Connection Succeeded (called by Socket through a callback)
++   * \param socket the connected socket
++   */
++  void ConnectionSucceeded (Ptr<Socket> socket);
++  /**
++   * \brief Connection Failed (called by Socket through a callback)
++   * \param socket the connected socket
++   */
++  void ConnectionFailed (Ptr<Socket> socket);
++  /**
++   * \brief This method schedules next packet for sending
++   *
++   * If there is a packet in send queue (ie *numReq != 0), schedule
++   * it for sending. If delay for the packet is > 0 seconds
++   * then schedule the packet after that delay.
++   * Otherwise update the m_totExpByte and go to receive mode.
++   *
++   */
++  void ScheduleTx (void);
++  /**
++   * \brief This method is called to send packet
++   *
++   * If the delay (packet.delay) for the packet is > 0 Seconds, then
++   * check all the parallel connections (packet.m_parallelConnList) between
++   * same client IP and server IP. If any of the parallel connection has
++   * not made desired progress or there is not enough buffer space available
++   * then reschedule the packet for later time.
++   * After sending the packet check whether there are more packet in send
++   * queue (ie m_numReq != 0), if so then call ScheduleTx again.
++   * Otherwise update m_expByte and go to receive mode.
++   *
++   * \param packet TraceReplayPacket containg packet details
++   */
++  void SendPacket (TraceReplayPacket packet);
++
++  /**
++   * \brief This method is to receive a packet
++   *
++   * Receive packets from server.
++   * If m_totRecByte < m_totExpByte, wait for server to send more packet.
++   * After that if there are packets in send queue, call ScheduleTx,
++   * otherwise close the connection.
++   *
++   * \param socket Associated socket
++   */
++  void ReceivePacket (Ptr<Socket> socket);
++
++  Ptr<Socket>     m_socket;       //!< Associated socket
++  Address         m_peer;         //!< Peer address
++  DataRate        m_dataRate;     //!< Data rate
++  EventId         m_sendEvent;    //!< Event Id of SendPacket
++  bool            m_connected;    //!< True if running
++  Address         m_ipClient;     //!< Real IP address of client
++  uint16_t        m_portClient;   //!< Real port address of client
++  Address         m_ipServer;     //!< Real IP address of server
++  uint16_t        m_portServer;   //!< Real port address of server
++  uint32_t        m_totRecByte;   //!< Total number of bytes recieved so far
++  uint32_t        m_totExpByte;   //!< Total number of bytes expected to receive
++  uint32_t        m_totByteCount; //!< Total number of bytes seen in connection (sent + received)
++
++  std::vector<uint32_t>             m_numReq;       //!< List of #packets to send as requests
++  std::vector<uint32_t>             m_expByte;      //!< List of total bytes expected to receive for each set of request
++  std::vector<TraceReplayPacket>    m_packetList;   //!< List of packets
++
++  std::vector<uint32_t>::iterator             m_numReqIt;        //!< m_numReq iterator
++  std::vector<uint32_t>::iterator             m_expByteIt;       //!< m_expByte iterator
++  std::vector<TraceReplayPacket>::iterator    m_packetListIt;    //!< m_packetList iterator
++  std::vector<Ptr<TraceReplayClient> >        m_parallelConnList; //!< List of all parallel connections
++};
++} // namespace ns3
++#endif /* TRACE_REPLAY_CLIENT_H */
+\ No newline at end of file
+Index: src/applications/model/trace-replay-server.cc
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/model/trace-replay-server.cc
+@@ -0,0 +1,359 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ */
++
++#include "ns3/log.h"
++#include "ns3/address.h"
++#include "ns3/inet-socket-address.h"
++#include "ns3/inet6-socket-address.h"
++#include "ns3/packet-socket-address.h"
++#include "ns3/node.h"
++#include "ns3/nstime.h"
++#include "ns3/data-rate.h"
++#include "ns3/random-variable-stream.h"
++#include "ns3/socket.h"
++#include "ns3/simulator.h"
++#include "ns3/socket-factory.h"
++#include "ns3/packet.h"
++#include "ns3/uinteger.h"
++#include "ns3/tcp-socket-factory.h"
++#include "ns3/string.h"
++#include "ns3/pointer.h"
++#include "ns3/trace-replay-utility.h"
++#include "trace-replay-server.h"
++
++namespace ns3 {
++NS_LOG_COMPONENT_DEFINE ("TraceReplayServer");
++NS_OBJECT_ENSURE_REGISTERED (TraceReplayServer);
++
++TypeId TraceReplayServer::GetTypeId (void)
++{
++  static TypeId tid = TypeId ("ns3::TraceReplayServer")
++    .SetParent<Application> ()
++    .SetGroupName ("Applications")
++    .AddConstructor<TraceReplayServer> ()
++  ;
++  return tid;
++}
++
++TraceReplayServer::TraceReplayServer ()
++{
++  NS_LOG_FUNCTION (this);
++  m_socket = 0;
++  m_connected = false;
++  m_totRecByte = 0;
++  m_totExpByte = 0;
++  m_totByteCount = 0;
++}
++
++TraceReplayServer::~TraceReplayServer ()
++{
++  NS_LOG_FUNCTION (this);
++  m_numRep.clear ();
++  m_expByte.clear ();
++  m_packetList.clear ();
++  m_parallelConnList.clear ();
++  m_socket = 0;
++}
++
++void
++TraceReplayServer::StartApplication (void)
++{
++  NS_LOG_FUNCTION (this);
++
++  m_connected = true;
++
++  if (m_socket == 0)
++    {
++      m_socket = Socket::CreateSocket (GetNode (), TcpSocketFactory::GetTypeId ());
++      m_socket->Bind (m_local);
++      m_socket->Listen ();
++    }
++
++  m_socket->SetAcceptCallback (
++    MakeNullCallback<bool, Ptr<Socket>, const Address &> (),
++    MakeCallback (&TraceReplayServer::HandleAccept, this));
++}
++
++void
++TraceReplayServer::StopApplication ()
++{
++  NS_LOG_FUNCTION (this);
++
++  m_connected = false;
++
++  if (m_socket != 0)
++    {
++      m_socket->Close ();
++      m_socket->SetAcceptCallback (
++        MakeNullCallback<bool, Ptr<Socket>, const Address &> (),
++        MakeNullCallback<void, Ptr<Socket>, const Address &> () );
++    }
++}
++
++void TraceReplayServer::HandleAccept (Ptr<Socket> socket, const Address& from)
++{
++  NS_LOG_FUNCTION (this);
++  if (m_totExpByte == 0)
++    {
++      ScheduleTx (socket);
++    }
++  else
++    {
++      socket->SetRecvCallback (MakeCallback (&TraceReplayServer::ReceivePacket, this));
++    }
++  socket->SetCloseCallbacks (MakeCallback (&TraceReplayServer::HandleSuccessClose, this),
++                             MakeNullCallback<void, Ptr<Socket> > () );
++}
++
++void TraceReplayServer::HandleSuccessClose (Ptr<Socket> socket)
++{
++  NS_LOG_FUNCTION (this);
++  socket->Close ();
++  socket->SetRecvCallback (MakeNullCallback<void, Ptr<Socket> > () );
++  socket->SetCloseCallbacks (MakeNullCallback<void, Ptr<Socket> > (),
++                             MakeNullCallback<void, Ptr<Socket> > () );
++}
++
++void
++TraceReplayServer::DoDispose (void)
++{
++  NS_LOG_FUNCTION (this);
++
++  m_socket = 0;
++  // chain up
++  Application::DoDispose ();
++}
++
++void
++TraceReplayServer::DoInitialize ()
++{
++  NS_LOG_FUNCTION (this);
++  for (uint32_t index = 0; index < GetNode ()->GetNApplications (); index++)
++    {
++      Ptr <TraceReplayServer> app = DynamicCast <TraceReplayServer>  (GetNode ()->GetApplication (index));
++      if (app && app->GetIpServer () == m_ipServer)
++        {
++          // Two connections are considered parallel if both source and destination Ip's
++          // are same as other connection
++          m_parallelConnList.push_back (app);
++        }
++    }
++  Application::DoInitialize ();
++}
++
++Address
++TraceReplayServer::GetIpServer () const
++{
++  NS_LOG_FUNCTION (this);
++  return m_ipServer;
++}
++
++uint16_t
++TraceReplayServer::GetPortServer () const
++{
++  NS_LOG_FUNCTION (this);
++  return m_portServer;
++}
++
++uint16_t
++TraceReplayServer::GetPortClient () const
++{
++  NS_LOG_FUNCTION (this);
++  return m_portClient;
++}
++
++uint32_t
++TraceReplayServer::GetTotalByteCount () const
++{
++  NS_LOG_FUNCTION (this);
++  return m_totByteCount;
++}
++
++void
++TraceReplayServer::SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer)
++{
++  NS_LOG_FUNCTION (this);
++  m_ipClient = ipClient;
++  m_ipServer = ipServer;
++  m_portClient = portClient;
++  m_portServer = portServer;
++}
++
++void
++TraceReplayServer::Setup (Address address, DataRate dataRate, std::vector<uint32_t> numRep, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList)
++{
++  NS_LOG_FUNCTION (this);
++  m_local = address;
++  m_dataRate = dataRate;
++
++  // If the conneciton does not have any packet then numRep will be empty.
++  // Insert 0 to indicate server that it does not have to send any packet
++  m_numRep = numRep;
++  if (m_numRep.empty ())
++    {
++      m_numRep.push_back (0);
++    }
++  m_numRepIt = m_numRep.begin ();
++
++  // If the conneciton does not have any packet then expByte will be empty.
++  // Insert 0 to indicate server that it does not have to receive any packet
++  m_expByte = expByte;
++  if (m_expByte.empty ())
++    {
++      m_expByte.push_back (0);
++    }
++  m_expByteIt = m_expByte.begin ();
++  // Update m_totExpByte, as server will start in receive mode
++  m_totExpByte = *(m_expByteIt++);
++
++  m_packetList = packetList;
++  m_packetListIt = m_packetList.begin ();
++}
++
++void
++TraceReplayServer::SendPacket (Ptr<Socket> socket, TraceReplayPacket packet)
++{
++  NS_LOG_FUNCTION (this);
++
++  if ((packet.GetDelay ()).IsStrictlyPositive ())
++    {
++      // If dalay > 0 seconds, check all parallel connections for progress
++      bool okToSend = true;
++      for (uint32_t i = 0; i < m_parallelConnList.size (); i++)
++        {
++          uint32_t expected = packet.GetByteCount (m_parallelConnList[i]->GetPortClient (), m_parallelConnList[i]->GetPortServer ());
++          uint32_t current = m_parallelConnList[i]->GetTotalByteCount ();
++          if (current < expected)
++            {
++              okToSend = false;
++              break;
++            }
++        }
++      if (!okToSend)
++        {
++          // Retry to send after 0.0001 seconds
++          Time tNext (Seconds (0.00001));
++          NS_LOG_LOGIC ("Parallel connections have not made desired progress. Scheduling next event at time "
++            << (Simulator::Now () + tNext));
++          Simulator::Schedule (tNext, &TraceReplayServer::SendPacket, this, socket, packet);
++          return;
++        }
++    }
++
++  if (socket->GetTxAvailable () < packet.GetSize ())
++    {
++      // Not enough buffer available
++      Time tNext = m_dataRate.CalculateBytesTxTime (packet.GetSize ());
++      NS_LOG_LOGIC ("Buffer not available. Scheduling next event at time " << (Simulator::Now () + tNext));
++      Simulator::Schedule (tNext, &TraceReplayServer::SendPacket, this, socket, packet);
++      return;
++    }
++
++  // Send packet
++  NS_LOG_LOGIC ("ServerIp " << m_ipServer << " ServerPort " << m_portServer << " sending packet of size " << packet.GetSize ());
++  Ptr<Packet> packetTmp = Create<Packet> (packet.GetSize ());
++  socket->Send (packetTmp);
++
++  // Update total byte count for this connection
++  m_totByteCount += packet.GetSize ();
++  if (*m_numRepIt > 0)
++    {
++      // more packets are in send queue, schedule next packet
++      ScheduleTx (socket);
++    }
++  else
++    {
++      // update expected number of total bytes to be received
++      m_totExpByte = *(m_expByteIt++);
++      m_totRecByte = 0;
++      if (m_numRepIt != m_numRep.end () && *m_numRepIt == 0)
++        {
++          // update the number of packets to send in next run
++          ++m_numRepIt;
++        }
++      // go to receive mode
++      socket->SetRecvCallback (MakeCallback (&TraceReplayServer::ReceivePacket, this));
++    }
++}
++
++void
++TraceReplayServer::ScheduleTx (Ptr<Socket> socket)
++{
++  NS_LOG_FUNCTION (this);
++  if (m_connected && *m_numRepIt > 0)
++    {
++      // Decrement number of packets to be send
++      *m_numRepIt -= 1;
++
++      TraceReplayPacket packet = *(m_packetListIt++);
++      if ((packet.GetDelay ()).IsStrictlyPositive ())
++        {
++          // schedule packet after 'delay'
++          Time tNext = packet.GetDelay () + m_dataRate.CalculateBytesTxTime (packet.GetSize ());
++          NS_LOG_LOGIC ("Packet sending scheduled at time " << (Simulator::Now () + tNext));
++          Simulator::Schedule (tNext, &TraceReplayServer::SendPacket, this, socket, packet);
++        }
++      else
++        {
++          SendPacket (socket, packet);
++          return;
++        }
++    }
++  else if (*m_numRepIt == 0)
++    {
++      // No more packet to send, update expected number total bytes to be received
++      m_totExpByte = *(m_expByteIt++);
++      m_totRecByte = 0;
++      // go to recieve mode
++      m_socket->SetRecvCallback (MakeCallback (&TraceReplayServer::ReceivePacket, this));
++    }
++}
++
++void
++TraceReplayServer::ReceivePacket (Ptr<Socket> socket)
++{
++  NS_LOG_FUNCTION (this);
++  // receive packet
++  Ptr<Packet> packet;
++  Address from;
++  while ((packet = socket->RecvFrom (from)))
++    {
++      if (packet->GetSize () > 0)
++        {
++          NS_LOG_LOGIC ("ServerIp " << m_ipServer << " ServerPort " << m_portServer << " received packet of size " << packet->GetSize () << " at " << Simulator::Now ());
++          // update total bytes received
++          m_totRecByte += packet->GetSize ();
++          m_totByteCount += packet->GetSize ();
++        }
++    }
++  // keep recieving packet
++  if (m_totRecByte < m_totExpByte)
++    {
++      socket->SetRecvCallback (MakeCallback (&TraceReplayServer::ReceivePacket, this));
++    }
++  else if (m_numRepIt != m_numRep.end () && *m_numRepIt > 0)
++    {
++      // go to send mode
++      ScheduleTx (socket);
++    }
++}
++} // namespace ns3
+\ No newline at end of file
+Index: src/applications/model/trace-replay-server.h
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/model/trace-replay-server.h
+@@ -0,0 +1,211 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ */
++
++#ifndef TRACE_REPLAY_SERVER_H
++#define TRACE_REPLAY_SERVER_H
++
++#include "ns3/address.h"
++#include "ns3/application.h"
++#include "ns3/event-id.h"
++#include "ns3/ptr.h"
++#include "ns3/data-rate.h"
++#include <vector>
++#include <cstdlib>
++#include <map>
++
++namespace ns3 {
++
++class Address;
++class Socket;
++class TraceReplayPacket;
++
++/**
++ * \ingroup applications
++ * \class TraceReplayServer
++ * \brief TraceReplayServer class acts as a tcp Server for TraceReplay.
++ *
++ * TraceReplayServer acts as a tcp server, which accepts connection from
++ * TraceReplayClient and communicates with it in a request-reply mode.
++ * In each cycle, it waits for client to send *m_expByte as request
++ * and sends *m_numReq number of packets, from m_packetList, as reply.
++ * Before sending a packet, if the delay for the packet > 0 seconds,
++ * it also checks the progress of all parallel connections
++ * between same client IP and server IP.
++ * If any of the parallel connection has not made sufficient progress
++ * then it reschedules the packet for later time,
++ * otherwise continues normal operation.
++ *
++ */
++
++class TraceReplayServer : public Application
++{
++public:
++  /**
++   * \brief Get the type ID.
++   * \return the object TypeId
++   */
++  static TypeId GetTypeId (void);
++
++  TraceReplayServer ();
++
++  ~TraceReplayServer ();
++
++  /**
++   * \brief Accepts the connection from client
++   *
++   * If m_totExpByte != 0 ie expecting some request bytes from client,
++   * call ReceivePacket(), else call ScheduleTx() to send packet
++   *
++   * \param socket the associated socket
++   * \param from Address of client
++   */
++  void HandleAccept (Ptr<Socket> socket, const Address& from);
++
++  /**
++   * \brief Close the server socket
++   *
++   * \param socket the connected socket
++   */
++  void HandleSuccessClose (Ptr<Socket> socket);
++
++  /**
++   * \brief This method initializes the connection's ids (real ip and port address of client and server).
++   *
++   * \param ipClient real ip address of client
++   * \param portClient real port number of client
++   * \param ipServer real ip address of corresponding server
++   * \param portServer real port number of corresponding server
++   */
++  void SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer);
++
++  /**
++   * \brief This method initializes the server object.
++   *
++   * \param address address to which server will bind to
++   * \param dataRate The datarate of the sever while sending reply to client
++   * \param numRep The vector containing number of packets to send as reply, after request from client
++   * \param expByte Vector containing the number of bytes expected as request before each reply
++   * \param packetList Vector containing server's TraceReplayPacket
++   */
++  void Setup (Address address, DataRate dataRate, std::vector<uint32_t> numRep, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList);
++
++  /**
++   * \brief Returns Ip address of server in the original connection
++   *
++   * \returns Address of server in trace file
++   */
++  Address GetIpServer (void) const;
++
++  /**
++   * \brief Returns port number of server in the original connection
++   *
++   * \returns Port number of server in trace file
++   */
++  uint16_t GetPortServer (void) const;
++
++  /**
++   * \brief Returns port number of client in the original connection
++   *
++   * \returns Port number of client in trace file
++   */
++  uint16_t GetPortClient (void) const;
++
++  /**
++   * \brief Returns total number of bytes seen in the connection (sent + received)
++   *
++   * \returns Total number of bytes seen in the connection (sent + received)
++   */
++  uint32_t GetTotalByteCount (void) const;
++
++protected:
++  virtual void DoDispose (void);
++
++private:
++  // inherited from Application base class
++  virtual void StartApplication (void); // Called at time specified by Start
++  virtual void StopApplication (void);  // Called at time specified by Stop
++  virtual void DoInitialize (void);
++
++  /**
++   * \brief This method schedules next packet for sending
++   *
++   * If there is a packet in send queue (ie *numReq != 0), schedule
++   * it for sending. If delay for the packet is > 0 seconds
++   * then schedule the packet after that delay.
++   * Otherwise update the m_totExpByte and go to receive mode.
++   *
++   * \param socket associated scoket
++   */
++  void ScheduleTx (Ptr<Socket> socket);
++
++  /**
++   * \brief This method is called to send packet
++   *
++   * If the delay (packet.delay) for the packet is > 0 Seconds, then
++   * check all the parallel connections (packet.m_parallelConnList) between
++   * same client IP and server IP. If any of the parallel connection has
++   * not made desired progress or there is not enough buffer space available
++   * then reschedule the packet for later time.
++   * After sending the packet check whether there are more packet in send
++   * queue (ie m_numRep != 0), if so then call ScheduleTx again.
++   * Otherwise update m_totExpByte and go to receive mode.
++   *
++   * \param socket associated socket
++   * \param packet TraceReplayPacket containg packet details
++   */
++  void SendPacket (Ptr<Socket> socket, TraceReplayPacket packet);
++
++  /**
++   * \brief This method is to receive a packet
++   *
++   * Receive packets from client.
++   * If m_totRecByte < m_totExpByte, wait for client to send more packet.
++   * After that if there are packets in send, call ScheduleTx,
++   * otherwise close the connection.
++   *
++   * \param socket Associated socket
++   */
++  void ReceivePacket (Ptr<Socket> socket);
++
++  Ptr<Socket>     m_socket;       //!< Associated socket
++  Address         m_local;        //!< Local address
++  bool            m_connected;    //!< True if running
++  DataRate        m_dataRate;     //!< Data Rate
++  Address         m_ipClient;     //!< Real IP address of client
++  uint16_t        m_portClient;   //!< Real port address of client
++  Address         m_ipServer;     //!< Real IP address of server
++  uint16_t        m_portServer;   //!< Real port address of server
++  uint32_t        m_totRecByte;   //!< Total number of bytes recieved so far
++  uint32_t        m_totExpByte;   //!< Total number of bytes expected to receive
++  uint32_t        m_totByteCount; //!< Total number of bytes seen in connection (sent + received)
++
++  std::vector<uint32_t>             m_numRep;       //!< List of #packets to send as reply
++  std::vector<uint32_t>             m_expByte;      //!< List of total bytes expected to receive as request
++  std::vector<TraceReplayPacket>    m_packetList;   //!< List of packets
++
++  std::vector<uint32_t>::iterator             m_numRepIt;        //!< m_numRep iterator
++  std::vector<uint32_t>::iterator             m_expByteIt;       //!< m_expByte iterator
++  std::vector<TraceReplayPacket>::iterator    m_packetListIt;    //!< m_packetList iterator
++  std::vector<Ptr<TraceReplayServer> >        m_parallelConnList; //!< List of all parallel connections
++};
++} // namespace ns3
++#endif /* TRACE_REPLAY_SERVER_H */
+\ No newline at end of file
+Index: src/applications/model/trace-replay-utility.cc
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/model/trace-replay-utility.cc
+@@ -0,0 +1,104 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ */
++
++#include "trace-replay-utility.h"
++namespace ns3 {
++
++TraceReplayPacket::TraceReplayPacket ()
++{
++  m_size = 0;
++  m_delay = Seconds (0);
++}
++
++TraceReplayPacket::~TraceReplayPacket ()
++{
++  m_parallelConnList.clear ();
++}
++
++uint32_t
++TraceReplayPacket::GetByteCount (uint16_t portClient, uint16_t portServer) const
++{
++  uint32_t expectedByte = 0;
++  for (uint32_t i = 0; i < m_parallelConnList.size (); i++)
++    {
++      if (m_parallelConnList[i].m_srcPort == portClient && m_parallelConnList[i].m_dstPort == portServer)
++        {
++          expectedByte = m_parallelConnList[i].m_byteCount;
++          break;
++        }
++    }
++  return expectedByte;
++}
++
++uint32_t
++TraceReplayPacket::GetNumParallelConnection () const
++{
++  return m_parallelConnList.size ();
++}
++
++uint32_t
++TraceReplayPacket::GetByteCount (uint32_t i) const
++{
++  return m_parallelConnList[i].m_byteCount;
++}
++
++std::pair<uint16_t, uint16_t>
++TraceReplayPacket::GetConnectionId (uint32_t i) const
++{
++  return std::make_pair (m_parallelConnList[i].m_srcPort, m_parallelConnList[i].m_dstPort);
++}
++
++void
++TraceReplayPacket::AddParallelConnection (uint16_t srcPort, uint16_t dstPort, uint32_t count)
++{
++  ParallelConnectionInfo parallelConn;
++  parallelConn.m_srcPort = srcPort;
++  parallelConn.m_dstPort = dstPort;
++  parallelConn.m_byteCount = count;
++  m_parallelConnList.push_back (parallelConn);
++}
++
++Time
++TraceReplayPacket::GetDelay () const
++{
++  return m_delay;
++}
++
++uint32_t
++TraceReplayPacket::GetSize () const
++{
++  return m_size;
++}
++
++void
++TraceReplayPacket::SetDelay (Time delay)
++{
++  m_delay = delay;
++}
++
++void
++TraceReplayPacket::SetSize (uint32_t size)
++{
++  m_size = size;
++}
++
++} // namespace ns3
+\ No newline at end of file
+Index: src/applications/model/trace-replay-utility.h
+===================================================================
+new file mode 100644
+--- /dev/null
++++ b/src/applications/model/trace-replay-utility.h
+@@ -0,0 +1,149 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++/*
++ * Copyright (c) 2015 Indian Institute of Technology Bombay
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation;
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * Author: Prakash Agrawal <prakashagr@cse.iitb.ac.in, prakash9752@gmail.com>
++ *         Prof. Mythili Vutukuru <mythili@cse.iitb.ac.in>
++ * Refrence: https://goo.gl/Z4ZW2K
++ */
++
++#ifndef TRACE_REPLAY_PACKET_H
++#define TRACE_REPLAY_PACKET_H
++
++#include "ns3/nstime.h"
++#include <iostream>
++#include <vector>
++#include <map>
++
++namespace ns3 {
++
++/**
++ * \brief TraceReplayPacket is a packet container for TraceReplay.
++ *
++ * A TraceReplayPacket is defined by its size and delay (taken from input pcap).
++ * Delay for a packet is application delay (inter packet gap greater than 1sec)
++ * or user think times (such as inter packet gap between HTTP requests).
++ * It is the idel time after which the packet was sent.
++ * TraceReplay tries to schedule the packet after 'delay'
++ * to create realistic simulation. 
++ *
++ * If the 'delay' is greater than 0 seconds, it also stores
++ * list of bytes seen by all parallel connections (parallel 
++ * to the connection to which packet belongs) till
++ * the instant when packet was sent. This info is used
++ * to check the progress of these parallel connections
++ * during simulation. If any of the parallel connection
++ * has not made desired progress, than packet will be delayed further. 
++ *
++ */
++class TraceReplayPacket
++{
++public:
++  TraceReplayPacket ();
++  virtual ~TraceReplayPacket ();
++  /**
++   * \brief Returns the number of parallel connection for the packet
++   *
++   * \returns Count of parallel connections for the packet
++   */
++  uint32_t GetNumParallelConnection () const;
++  /**
++   * \brief Returns the #Bytes for i'th parallel connection
++   *
++   * \param i index of the parallel connection
++
++   * \returns #Bytes for i'th parallel connection
++   */
++  uint32_t GetByteCount (uint32_t i) const;
++
++  /**
++   * \brief Returns source and destination port number of i'th parallel connection
++   *
++   * \param i index for m_parallelConnList
++   *
++   * \returns source and destination port number pair of i'th parallel connection
++   */
++  std::pair<uint16_t, uint16_t> GetConnectionId (uint32_t i) const;
++
++  /**
++   * \brief Add a parallel connection to m_parallelConnList
++   *
++   * Parallel connections are those connections for which source and
++   * destination Ip's are same, but port number's are different.
++   *
++   * \param srcPort Source port number of parallel connection
++   * \param dstPort Destination port number of parallel connection
++   * \param byteCount #Bytes seen (sent + received) by connection at that moment
++   */
++  void AddParallelConnection (uint16_t srcPort, uint16_t dstPort, uint32_t byteCount);
++
++  /**
++   * \brief Set size of TraceReplayPacket
++   *
++   * \param size size of packet
++   */
++  void SetSize (uint32_t size);
++
++  /**
++   * \brief Set delay of TraceReplayPacket
++   *
++   * Delay for a packet is application delay (inter packet time gap greater than 1sec)
++   * or user think times (such as inter packet gap between HTTP requests).
++   * It is the idel time after which the packet was sent.
++   * TraceReplay tries to schedule the packet after 'delay'
++   * to create realistic simulation.
++   *
++   * \param delay delay of packet
++   */
++  void SetDelay (Time delay);
++
++  /**
++   * \brief Return size of TraceReplayPacket
++   *
++   * \returns Size of the packet
++   */
++  uint32_t GetSize () const;
++
++  /**
++   * \brief Return delay of TraceReplayPacket
++   *
++   * \returns delay for the packet
++   */
++  Time GetDelay () const;
++
++  /**
++   * \brief Returns byte count for connection between portClient and portServer
++   *
++   * \param portClient Port number of client
++   * \param portServer Port number of server
++   *
++   * \returns total number of bytes seen (sent+recieved) by the connection in the pcap
++   */
++  uint32_t GetByteCount (uint16_t portClient, uint16_t portServer) const;
++
++private:
++  struct ParallelConnectionInfo
++  {
++    uint16_t       m_srcPort;     //!< client's port number of parallel connection
++    uint16_t       m_dstPort;     //!< server's port number of parallel connection
++    uint32_t       m_byteCount;   //!< #packet send by connection at that moment
++  };
++  uint32_t         m_size;        //!< Size of packet
++  Time             m_delay;       //!< Delay of packet
++  std::vector<ParallelConnectionInfo> m_parallelConnList;   //!< List of parallel connections for packet
++};
++} // namespace ns3
++#endif
+\ No newline at end of file
+Index: src/applications/wscript
+===================================================================
+--- a/src/applications/wscript
++++ b/src/applications/wscript
+@@ -14,11 +14,15 @@
+         'model/udp-echo-client.cc',
+         'model/udp-echo-server.cc',
+         'model/application-packet-probe.cc',
++	'model/trace-replay-client.cc',
++	'model/trace-replay-server.cc',
++	'model/trace-replay-utility.cc',
+         'helper/bulk-send-helper.cc',
+         'helper/on-off-helper.cc',
+         'helper/packet-sink-helper.cc',
+         'helper/udp-client-server-helper.cc',
+         'helper/udp-echo-helper.cc',
++	'helper/trace-replay-helper.cc',
+         ]
+ 
+     applications_test = bld.create_ns3_module_test_library('applications')
+@@ -40,11 +44,15 @@
+         'model/udp-echo-client.h',
+         'model/udp-echo-server.h',
+         'model/application-packet-probe.h',
++	'model/trace-replay-client.h',
++	'model/trace-replay-server.h',
++	'model/trace-replay-utility.h',
+         'helper/bulk-send-helper.h',
+         'helper/on-off-helper.h',
+         'helper/packet-sink-helper.h',
+         'helper/udp-client-server-helper.h',
+         'helper/udp-echo-helper.h',
++	'helper/trace-replay-helper.h',
+         ]
+ 
+     bld.ns3_python_bindings()

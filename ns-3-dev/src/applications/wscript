@@ -14,11 +14,15 @@ def build(bld):
         'model/udp-echo-client.cc',
         'model/udp-echo-server.cc',
         'model/application-packet-probe.cc',
+	'model/trace-replay-client.cc',
+	'model/trace-replay-server.cc',
+	'model/trace-replay-utility.cc',
         'helper/bulk-send-helper.cc',
         'helper/on-off-helper.cc',
         'helper/packet-sink-helper.cc',
         'helper/udp-client-server-helper.cc',
         'helper/udp-echo-helper.cc',
+	'helper/trace-replay-helper.cc',
         ]
 
     applications_test = bld.create_ns3_module_test_library('applications')
@@ -40,11 +44,15 @@ def build(bld):
         'model/udp-echo-client.h',
         'model/udp-echo-server.h',
         'model/application-packet-probe.h',
+	'model/trace-replay-client.h',
+	'model/trace-replay-server.h',
+	'model/trace-replay-utility.h',
         'helper/bulk-send-helper.h',
         'helper/on-off-helper.h',
         'helper/packet-sink-helper.h',
         'helper/udp-client-server-helper.h',
         'helper/udp-echo-helper.h',
+	'helper/trace-replay-helper.h',
         ]
 
     bld.ns3_python_bindings()
