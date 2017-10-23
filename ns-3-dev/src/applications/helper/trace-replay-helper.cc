@@ -636,7 +636,7 @@ TraceReplayHelper::Install (Ptr<Node> clientNode, Ptr<Node> remoteNode, Address 
       uint16_t portServer = 0;
       double startTime = 0.0;
       {
-        std::string line = CheckRegex (infile, std::regex ("^*\t[0-9]+\t*[0-9]+\t[0-9]+[.]?[0-9]*$"));
+        std::string line = CheckRegex (infile, std::regex ("^.*\t[0-9]+\t.*[0-9]+\t[0-9]+[.]?[0-9]*$"));
         std::istringstream iss (line);
         iss >> ipClientTmp >> portClient >> ipServerTmp >> portServer >> startTime;
       }
