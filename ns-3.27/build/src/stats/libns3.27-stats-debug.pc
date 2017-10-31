@@ -1,0 +1,10 @@
+prefix=/usr/local
+libdir=/usr/local/lib
+includedir=/usr/local/include/ns3.27
+
+Name: libns3-stats
+Description: ns-3 module ns3-stats
+Version: 3.27
+Libs: -L${libdir} -lns3.27-stats-debug -L/opt/local/lib -lsqlite3
+Cflags: -I${includedir} -DHAVE_SQLITE3=1 -I/opt/local/include
+Requires: libns3.27-core-debug

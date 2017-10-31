@@ -1,0 +1,197 @@
+# ------------------------------------------------
+# Trace file: traceFile.txt
+# File structure:-
+# Number of client
+# For each client {
+# 	Number of connection
+# 	For each connection {
+# 		Ip_Client	Port_Client	Ip_server	Port_Server	Start_Time
+# 		Number of packets from client to server
+# 		For each packet from client to server {
+# 			Packet_Size	Packet_Delay
+# 		}
+# 		Number of client request
+# 		For each request {
+# 			Number of packets to send before going to receive mode
+# 		}
+# 		Number of server response
+# 		For each response {
+# 			Number of bytes to receive before going to send mode
+# 		}
+# 		Number of packet from server to client
+# 		For each packet from server to client {
+# 			Packet_Size	Packet_Delay
+# 		}
+# 		Number of server response
+# 		For each response {
+# 			Number of packets to send before going to receive mode
+# 		}
+# 		Number of client request
+# 		For each request {
+# 			Number of bytes to receive before going to send mode
+# 		}
+# 	}
+# }
+# ------------------------------------------------
+1
+180.149.60.80	443	10.50.51.67	50762	0
+152
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+1380	0
+812	0
+1
+152
+0
+0
+0
+1
+209192
