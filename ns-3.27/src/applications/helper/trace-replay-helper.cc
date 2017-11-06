@@ -48,6 +48,7 @@ NS_LOG_COMPONENT_DEFINE ("TraceReplayHelper");
 
 TraceReplayHelper::TraceReplayHelper (DataRate dataRate)
 {
+  NS_LOG_FUNCTION (this << dataRate);
   m_stopTime = Seconds (0);
   m_startTimeOffset = Seconds (0);
   m_dataRate = dataRate;
@@ -60,15 +61,14 @@ TraceReplayHelper::TraceReplayHelper (DataRate dataRate)
   m_startTimeJitter = CreateObject<UniformRandomVariable> ();
   m_startTimeJitter->SetAttribute ("Min", DoubleValue (0));
   m_startTimeJitter->SetAttribute ("Max", DoubleValue (1000));
-  NS_LOG_FUNCTION (this);
 }
 
 TraceReplayHelper::~TraceReplayHelper ()
 {
+  NS_LOG_FUNCTION (this);
   m_connMap.clear ();
   m_timeoutMap.clear ();
   m_httpReqMap.clear ();
-  NS_LOG_FUNCTION (this);
 }
 
 bool
@@ -85,21 +85,21 @@ TraceReplayHelper::m_connId::operator< (const m_connId& rhs) const
 void
 TraceReplayHelper::SetPcap (std::string pcap)
 {
-  NS_LOG_FUNCTION (this);
+  NS_LOG_FUNCTION (this << pcap);
   m_pcapPath = pcap;
 }
 
 void
 TraceReplayHelper::SetTraceFile (std::string traceFile)
 {
-  NS_LOG_FUNCTION (this);
+  NS_LOG_FUNCTION (this << traceFile);
   m_traceFilePath = traceFile;
 }
 
 int64_t
 TraceReplayHelper::AssignStreams (int64_t stream)
 {
-  NS_LOG_FUNCTION (this);
+  NS_LOG_FUNCTION (this << stream);
   m_startTimeJitter->SetStream (stream);
   return 1;
 }
@@ -107,21 +107,21 @@ TraceReplayHelper::AssignStreams (int64_t stream)
 void
 TraceReplayHelper::SetStopTime (Time stopTime)
 {
-  NS_LOG_FUNCTION (this);
+  NS_LOG_FUNCTION (this << stopTime);
   m_stopTime = stopTime;
 }
 
 void
 TraceReplayHelper::SetStartTimeOffset (Time time)
 {
-  NS_LOG_FUNCTION (this);
+  NS_LOG_FUNCTION (this << time);
   m_startTimeOffset = time;
 }
 
 void
 TraceReplayHelper::SetPortNumber (uint16_t port)
 {
-  NS_LOG_FUNCTION (this);
+  NS_LOG_FUNCTION (this << port);
   m_portNumber = port;
 }
 
@@ -200,6 +200,7 @@ double
 TraceReplayHelper::CalculatePacketDelay (uint32_t frameNum, bool timeOut, bool httpReq, double currTime, double packetTime)
 {
   double delay = 0;
+  Time t1 = Seconds (0.000001);
   // if it is time out packet then delay will be 0 as TraceReplay is trying to simulate only application layer delays
   if (!timeOut)
     {
@@ -217,7 +218,7 @@ TraceReplayHelper::CalculatePacketDelay (uint32_t frameNum, bool timeOut, bool h
         }
       delay = std::max (httpDelay, sshDelay);
     }
-  if (delay < 0.000001)
+  if (delay < t1)
     {
       return 0;
     }
@@ -594,7 +595,7 @@ TraceReplayHelper::CheckRegex (std::ifstream& infile, std::regex reg)
 void
 TraceReplayHelper::Install (Ptr<Node> clientNode, Ptr<Node> remoteNode, Address remoteAddress)
 {
-  NS_LOG_FUNCTION (this);
+  NS_LOG_FUNCTION (this << clientNode << remoteNode << remoteAddress);
 
   std::string filename = "";
   if (std::ifstream (m_pcapPath.c_str ()))

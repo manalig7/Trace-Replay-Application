@@ -157,13 +157,14 @@ main (int argc, char *argv[])
   Ipv4InterfaceContainer wifiInterfaces;
   wifiInterfaces = address.Assign (staDevices);
   address.Assign (apDevices);
-
+  int64_t streamIndex=1;
   NS_LOG_INFO ("Create TraceReplay on each wifi client and server pair.");
   for (uint32_t i = 0; i < nWifi; i++)
     {
       TraceReplayHelper application (DataRate ("25MBps"));
       application.SetPcap (pcapPath);
-      application.AssignStreams (i);
+      //application.AssignStreams (i);
+      streamIndex += application.AssignStreams (streamIndex);
       application.SetStopTime (stopTime);
       application.SetPortNumber (49153 + 200 * i);
       application.Install (wifiStaNodes.Get (i), p2pNodes.Get (1), Address (p2pInterfaces.GetAddress (1)));
