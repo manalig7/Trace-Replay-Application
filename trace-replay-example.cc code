@@ -1,3 +1,13 @@
 
 create topology as described
 Assign ip addresses for each interface
+
+TraceReplayHelper application (DataRate ("XXXMBps"));
+
+Functions called:
+
+application.SetPcap (pcapPath);
+application.AssignStreams (i);
+application.SetStopTime (stopTime);
+application.SetPortNumber (49153 + 200 * i);
+application.Install (wifiStaNodes.Get (i), p2pNodes.Get (1), Address (p2pInterfaces.GetAddress (1)));
