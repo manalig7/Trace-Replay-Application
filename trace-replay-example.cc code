@@ -4,10 +4,17 @@ Assign ip addresses for each interface
 
 TraceReplayHelper application (DataRate ("XXXMBps"));
 
-Functions called:
+methods called:
 
-application.SetPcap (pcapPath);
-application.AssignStreams (i);
-application.SetStopTime (stopTime);
-application.SetPortNumber (49153 + 200 * i);
-application.Install (wifiStaNodes.Get (i), p2pNodes.Get (1), Address (p2pInterfaces.GetAddress (1)));
+application.SetPcap (pcapPath)------>This method sets the input the pcap file. It is optional if the trace file is provided.
+
+application.AssignStreams (i)------>Assign a fixed random variable stream number to the random variables used by this model.
+Use to avoid synchronization between multiple clients start time.
+
+application.SetStopTime (stopTime)------>This methods sets the stop time for the connection.
+
+application.SetPortNumber (49153 + 200 * i)------->This methods sets the starting port number for client.
+All the connections for client will start from this port number
+
+application.Install (wifiStaNodes.Get (i), p2pNodes.Get (1), Address (p2pInterfaces.GetAddress (1)))----->Creates the trace file, if not present, and initializes all client-server pairs
+This method reads the traceFile.txt file and initializes all client-server connections.
