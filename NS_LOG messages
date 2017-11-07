@@ -1,0 +1,9 @@
+There are currently seven levels of log messages of increasing verbosity defined in the system.
+
+NS_LOG_ERROR — Log error messages;
+NS_LOG_WARN — Log warning messages;
+NS_LOG_DEBUG — Log relatively rare, ad-hoc debugging messages;
+NS_LOG_INFO — Log informational messages about program progress;
+NS_LOG_FUNCTION — Log a message describing each function called;
+NS_LOG_LOGIC – Log messages describing logical flow within a function;
+NS_LOG_ALL — Log everything.
