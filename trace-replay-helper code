@@ -1,0 +1,23 @@
+#ifndef --> checks whether the given token has been #defined earlier in the file or in an included file
+
+m_startTimeJitter = CreateObject<UniformRandomVariable> ();
+###The uniform distribution Random Number Generator (RNG).
+This class supports the creation of objects that return random numbers from a fixed uniform distribution. It also supports the generation of single random numbers from various uniform distributions.
+The output range is $[min, max)$ for floating point values, (max excluded), and $[min, max]$ (max included) for integral values.###
+
+setstream();
+###stream--->
+Stream: The stream number for this RNG stream. -1 means "allocate a stream automatically". Note that if -1 is set, Get will return -1 so that it is not possible to know which value was automatically allocated.
+Set with class: ns3::IntegerValue
+Underlying type: int64_t -9223372036854775808:9223372036854775807
+Initial value: -1
+Flags: construct write read
+###
+
+VAR.c_str()
+###Returns a pointer to an array that contains a null-terminated sequence
+of characters (i.e., a C-string) representing the current value of the string object.###
+
+system()
+###Invokes the command processor to execute a command.###
+
