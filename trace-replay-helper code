@@ -21,3 +21,29 @@ of characters (i.e., a C-string) representing the current value of the string ob
 system()
 ###Invokes the command processor to execute a command.###
 
+CheckRegex (std::ifstream& infile, std::regex reg){
+if (std::regex_search (line.begin (), line.end (), std::regex ("^#")))  //////Comments
+but after breaking it won't consider other comments
+}
+
+Install() method:
+{
+  uint32_t numConn = 0; // number of connection per client extracted from trace file
+  std::string line = CheckRegex (infile, std::regex ("^[0-9]..............$"));
+  
+  std:istringstream 
+  
+  #################
+  EX:
+  {
+    std::string stringvalues = "125 320 512 750 333";
+    std::istringstream iss (stringvalues);
+
+    for (int n=0; n<5; n++)
+    {
+      int val;
+      iss >> val;
+      std::cout << val*2 << '\n';
+    }
+   }
+   ##################
