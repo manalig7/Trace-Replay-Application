@@ -1,8 +1,10 @@
 
 
 m_parallelConnList => is the parallel connection vector of the struct ParallelConnectionInfo (declared in trace-replay-utility.h)
+The struct ParallelConnectionInfo contains the source port, destination port and the byte count.
 
-TraceReplayPacket => Initializes the parallel connection with delay = 0 and size = 0
+
+TraceReplayPacket => Initializes the packet with delay = 0 and size = 0
 
 GetByteCount => Gets the byte count of that particular parallel connection. We can either give the connection index or the source and destination port number
 
