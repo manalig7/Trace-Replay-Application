@@ -47,3 +47,20 @@ Install() method:
     }
    }
    ##################
+
+processpacket() method:
+{
+    //delay > 0 seconds
+    // Therefore get the list of all parallel connections and total packets sent by so far
+    
+    // A parallel connection is that in which src and dst ips are same
+    // but src and dst port are different.
+    // Ignore the connection if total packet send by it so far is 0
+}
+
+ProcessPacketList() method:
+{
+  // If the packet is from server to client then ip and port numbers for source and destination will be reversed
+  // if the ip and port number for packet are not present in map then insert it as new connection
+  //send to preocesspacket()
+}
