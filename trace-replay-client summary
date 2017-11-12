@@ -1,0 +1,7 @@
+GetTypeId => Returns the type ID
+
+StartApplication (void) => Called at the time specified by Start, and derived from the base class Applicatiom
+
+SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer) => This method initializes the connection's ids (real ip and port address of client and server).
+The parameters are real ip address and port number of the client and server.
+
