@@ -89,7 +89,7 @@ public:
    * \param expByte Vector containing the number of bytes expected as reply for each request
    * \param packetList Vector containing client's TraceReplayPacket
    */
-  void Setup (Address address, DataRate dataRate, std::vector<uint32_t> numReq, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList);
+  void Setup (const Address address, DataRate dataRate, std::vector<uint32_t> numReq, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList);
 
   /**
    * \brief Returns real Ip address of server in the original connection
