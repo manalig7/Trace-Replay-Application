@@ -45,7 +45,7 @@ class TraceReplayPacket;
  *
  * TraceReplayServer acts as a tcp server, which accepts connection from
  * TraceReplayClient and communicates with it in a request-reply mode.
- * In each cycle, it waits for client to send *m_expByte as request
+ * In each cycle, it waits for client to send expected number of bytes as request
  * and sends *m_numReq number of packets, from m_packetList, as reply.
  * Before sending a packet, if the delay for the packet > 0 seconds,
  * it also checks the progress of all parallel connections
@@ -95,7 +95,7 @@ public:
    * \param ipServer real ip address of corresponding server
    * \param portServer real port number of corresponding server
    */
-  void SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer);
+  void SetConnectionId (const Address ipClient, uint16_t portClient, const Address ipServer, uint16_t portServer);
 
   /**
    * \brief This method initializes the server object.
@@ -106,7 +106,7 @@ public:
    * \param expByte Vector containing the number of bytes expected as request before each reply
    * \param packetList Vector containing server's TraceReplayPacket
    */
-  void Setup (Address address, DataRate dataRate, std::vector<uint32_t> numRep, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList);
+  void Setup (const Address address, DataRate dataRate, std::vector<uint32_t> numRep, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList);
 
   /**
    * \brief Returns Ip address of server in the original connection
