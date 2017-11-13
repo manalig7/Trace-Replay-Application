@@ -189,7 +189,7 @@ TraceReplayServer::GetTotalByteCount () const
 }
 
 void
-TraceReplayServer::SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer)
+TraceReplayServer::SetConnectionId (const Address ipClient, uint16_t portClient, const Address ipServer, uint16_t portServer)
 {
   NS_LOG_FUNCTION (this);
   m_ipClient = ipClient;
@@ -199,7 +199,7 @@ TraceReplayServer::SetConnectionId (Address ipClient, uint16_t portClient, Addre
 }
 
 void
-TraceReplayServer::Setup (Address address, DataRate dataRate, std::vector<uint32_t> numRep, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList)
+TraceReplayServer::Setup (const Address address, DataRate dataRate, std::vector<uint32_t> numRep, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList)
 {
   NS_LOG_FUNCTION (this);
   m_local = address;
@@ -250,8 +250,8 @@ TraceReplayServer::SendPacket (Ptr<Socket> socket, TraceReplayPacket packet)
         }
       if (!okToSend)
         {
-          // Retry to send after 0.0001 seconds
-          Time tNext (Seconds (0.00001));
+          // Retry to send after 10 microseconds
+          Time tNext (MicroSeconds (10));
           NS_LOG_LOGIC ("Parallel connections have not made desired progress. Scheduling next event at time "
             << (Simulator::Now () + tNext));
           Simulator::Schedule (tNext, &TraceReplayServer::SendPacket, this, socket, packet);
