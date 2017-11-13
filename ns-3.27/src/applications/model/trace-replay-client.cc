@@ -196,11 +196,13 @@ TraceReplayClient::Setup (const Address address, DataRate dataRate, std::vector<
   m_peer = address;
   m_dataRate = dataRate;
 
-  // If the conneciton does not have any packet then numReq will be empty.
-  // Insert 0 to indicate client that it does not have to send any packet
+  
+ 
   m_numReq = numReq;
-  if (m_numReq.empty ())
+  // If the connection does not have any packet then numReq will be empty.
+  if (m_numReq.empty ())    
     {
+      // Insert 0 to indicate client that it does not have to send any packet
       m_numReq.push_back (0);
     }
   m_numReqIt = m_numReq.begin ();
@@ -239,8 +241,8 @@ TraceReplayClient::SendPacket (TraceReplayPacket packet)
         }
       if (!okToSend)
         {
-          // Retry to send after 0.0001 seconds
-          Time tNext (Seconds (0.00001));
+          // Retry to send after 10 microseconds
+          Time tNext (MicroSeconds (10));
           NS_LOG_LOGIC ("Parallel connections have not made desired progress. Scheduling next event at time "
             << (Simulator::Now () + tNext));
           Simulator::Schedule (tNext, &TraceReplayClient::SendPacket, this, packet);
