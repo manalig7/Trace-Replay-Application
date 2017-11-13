@@ -1,1 +1,34 @@
+TraceReplayHelper installs TraceReplayClient on each client and corresponding TraceReplayServer, for each connection.
 
+Step wise explanation from trace-replay-helper.cc
+
+STEP 1
+This code in trace-replay-helper initializes the TraceReplayServer Object.
+Ptr<TraceReplayServer> server = CreateObject<TraceReplayServer> ();
+
+The Trace Replay Server's constructor is called when the object is created and the following variables are initialized:
+  m_socket = 0;
+  m_connected = false;
+  m_totRecByte = 0;
+  m_totExpByte = 0;
+  m_totByteCount = 0;
+  
+
+
+STEP 2
+The next thing in the trace-replay-example is:
+server->SetConnectionId (ipClient, portClient, ipServer, portServer);
+
+TraceReplayServer::SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer)
+{
+  NS_LOG_FUNCTION (this);
+  m_ipClient = ipClient;
+  m_ipServer = ipServer;
+  m_portClient = portClient;
+  m_portServer = portServer;
+}
+This initializes the real IP address of client and server and real port numbers of client and server.  
+
+
+STEP 3
+server->Setup (address, m_dataRate, numRep, expByte, packetList);
