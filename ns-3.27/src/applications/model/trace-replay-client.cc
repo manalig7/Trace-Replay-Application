@@ -180,7 +180,7 @@ TraceReplayClient::GetTotalByteCount () const
 }
 
 void
-TraceReplayClient::SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer)
+TraceReplayClient::SetConnectionId (const Address ipClient, uint16_t portClient, const Address ipServer, uint16_t portServer)
 {
   NS_LOG_FUNCTION (this);
   m_ipClient = ipClient;
@@ -190,7 +190,7 @@ TraceReplayClient::SetConnectionId (Address ipClient, uint16_t portClient, Addre
 }
 
 void
-TraceReplayClient::Setup (Address address, DataRate dataRate, std::vector<uint32_t> numReq, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList)
+TraceReplayClient::Setup (const Address address, DataRate dataRate, std::vector<uint32_t> numReq, std::vector<uint32_t> expByte, std::vector<TraceReplayPacket> packetList)
 {
   NS_LOG_FUNCTION (this);
   m_peer = address;
