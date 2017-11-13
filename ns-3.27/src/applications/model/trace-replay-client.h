@@ -78,7 +78,7 @@ public:
    * \param ipServer real ip address of corresponding server
    * \param portServer real port number of corresponding server
    */
-  void SetConnectionId (Address ipClient, uint16_t portClient, Address ipServer, uint16_t portServer);
+  void SetConnectionId (const Address ipClient, uint16_t portClient, const Address ipServer, uint16_t portServer);
 
   /**
    * \brief This method initializes the client object.
@@ -185,7 +185,7 @@ private:
   uint16_t        m_portClient;   //!< Real port address of client
   Address         m_ipServer;     //!< Real IP address of server
   uint16_t        m_portServer;   //!< Real port address of server
-  uint32_t        m_totRecByte;   //!< Total number of bytes recieved so far
+  uint32_t        m_totRecByte;   //!< Total number of bytes received so far
   uint32_t        m_totExpByte;   //!< Total number of bytes expected to receive
   uint32_t        m_totByteCount; //!< Total number of bytes seen in connection (sent + received)
 
