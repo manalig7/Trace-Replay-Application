@@ -16,3 +16,7 @@ TraceReplay[1] is a new application layer model in ns-3.User collects pcap trace
 
 When running the trace-replay-example with a pcap file as input, the following error observed:
 terminating with uncaught exception of type std::__1::regex_error
+
+The issues have been resolved and the list of changes made can be found in the file 'Changes made to the code'
+
+The graphs obtained can be viewed - uploadtraffic.png and downloadtraffic.png
