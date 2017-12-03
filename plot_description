@@ -1,0 +1,9 @@
+Steps for plotting the traffic graphs:
+
+1. Collect the input pcap file and the output pcap file(the one obtained after running the trace replay application
+with input pcap file)
+2. Convert both input pcap and output pcap to csv files by using the 'Export Packet Dissections' option in Wireshark.
+3. Remove the first line in the csv file, remove " and replace , with space.
+4. Run the reader.awk file with the modified csv files as output and write the output to respective txt files.
+5. Remove the last line from the txt files.
+6. Give these txt files as input to plot.py and plot the graphs.
