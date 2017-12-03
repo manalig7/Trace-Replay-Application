@@ -83,7 +83,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("nWifi", "Number of client", nWifi);
   cmd.Parse (argc, argv);
 
-  Time stopTime = Seconds(1000);
+  Time stopTime = Seconds(10000);
 
   NS_LOG_INFO ("Create p2p nodes.");
   NodeContainer p2pNodes;
