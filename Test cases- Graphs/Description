@@ -1,2 +1,6 @@
 The uploaded files with prefix 'd' followed by a number are the graphs of number of kilobytes per second 
 obtained by running 20 pcap files. 
+
+The blue dots signify the kilobytes per second traffic for input pcap file(which was captured through the experiment).
+Green dots signify the kilobytes per second traffic for output pcap file(the one obtained after running the trace replay
+application using the input pcap file as input).
